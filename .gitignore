@@ -1,3 +1,9 @@
 *.o
 *.ko
 *.cmd
+*.d
+*.ver
+.tmp_versions
+modules.order
+*mod.c
+
