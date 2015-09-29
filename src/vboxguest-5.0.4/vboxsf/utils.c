@@ -220,6 +220,7 @@ int sf_inode_revalidate(struct dentry *dentry)
     struct sf_glob_info *sf_g;
     struct sf_inode_info *sf_i;
     SHFLFSOBJINFO info;
+    time_t old_time;
 
     TRACE();
     if (!dentry || !dentry->d_inode)
@@ -243,7 +244,7 @@ int sf_inode_revalidate(struct dentry *dentry)
 
     if (!sf_i->force_restat)
     {
-        if (jiffies - dentry->d_time < sf_g->ttl)
+        if (jiffies - dentry->d_time <= sf_g->ttl)
             return 0;
     }
 
@@ -252,7 +253,17 @@ int sf_inode_revalidate(struct dentry *dentry)
         return err;
 
     dentry->d_time = jiffies;
+
+    old_time = dentry->d_inode->i_mtime.tv_sec;
+    sf_ftime_from_timespec(&dentry->d_inode->i_mtime, &info.ModificationTime);
+
+    if ( info.cbObject != dentry->d_inode->i_size ||
+              old_time != dentry->d_inode->i_mtime.tv_sec){
+        invalidate_inode_pages2(dentry->d_inode->i_mapping);
+    }
+
     sf_init_inode(sf_g, dentry->d_inode, &info);
+    sf_i->force_restat = 0;
     return 0;
 }
 
@@ -872,7 +883,7 @@ int sf_init_backing_dev(struct sf_glob_info *sf_g)
     static uint64_t s_u64Sequence = 0;
     uint64_t u64CurrentSequence = ASMAtomicIncU64(&s_u64Sequence);
 
-    sf_g->bdi.ra_pages = 0; /* No readahead */
+    sf_g->bdi.ra_pages = 32;
 # if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 12)
     sf_g->bdi.capabilities  = BDI_CAP_MAP_DIRECT    /* MAP_SHARED */
                             | BDI_CAP_MAP_COPY      /* MAP_PRIVATE */

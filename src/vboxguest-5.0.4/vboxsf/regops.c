@@ -91,6 +91,57 @@ static int sf_reg_write_aux(const char *caller, struct sf_glob_info *sf_g,
     return 0;
 }
 
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 16, 0)
+
+#include <linux/nfs_fs.h>
+static ssize_t
+sf_file_read(struct kiocb *iocb, struct iov_iter *iov)
+{
+   int err;
+   struct dentry *dentry;
+
+   dentry = iocb->ki_filp->f_path.dentry;
+   err = sf_inode_revalidate(dentry);
+   if (err)
+       return err;
+   return generic_file_read_iter(iocb, iov);
+}
+
+static int sf_need_sync_write(struct file *file, struct inode *inode)
+{
+    // >= kernel version 2.6.33
+    if (IS_SYNC(inode) || file->f_flags & O_DSYNC) {
+       return 1;
+    }
+    return 0;
+}
+
+static ssize_t
+sf_file_write(struct kiocb *iocb, struct iov_iter *iov)
+{
+   int err;
+   ssize_t result;
+   struct file *file = iocb->ki_filp;
+   struct dentry *dentry = file->f_path.dentry;
+   struct inode *inode = dentry->d_inode;
+
+   err = sf_inode_revalidate(dentry);
+   if (err)
+       return err;
+
+   result = generic_file_write_iter(iocb, iov);
+
+   if (result >= 0 && sf_need_sync_write(file, inode)) {
+      err = vfs_fsync(file, 0);
+      if (err < 0) {
+         result = err;
+      }
+   }
+   return result;
+}
+
+#else /* KERNEL_VERSION >= 3.16.0 */
 /**
  * Read from a regular file.
  *
@@ -265,6 +316,35 @@ fail:
     free_bounce_buffer(tmp);
     return err;
 }
+#endif /* KERNEL_VERSION >= 3.16.0 */
+
+static loff_t
+sf_file_llseek(struct file *file, loff_t offset, int origin)
+{
+   int err;
+   struct dentry *dentry;
+
+   dentry = file->f_path.dentry;
+   err = sf_inode_revalidate(dentry);
+   if (err)
+       return err;
+   return generic_file_llseek(file, offset, origin);
+}
+
+# if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 23)
+static ssize_t
+sf_file_splice_read(struct file *file, loff_t *offset, struct pipe_inode_info *pipe, size_t len, unsigned int flags)
+{
+   int err;
+   struct dentry *dentry;
+
+   dentry = file->f_path.dentry;
+   err = sf_inode_revalidate(dentry);
+   if (err)
+       return err;
+   return generic_file_splice_read(file, offset, pipe, len, flags);
+}
+# endif
 
 /**
  * Open a regular file.
@@ -563,30 +643,32 @@ static int sf_reg_mmap(struct file *file, struct vm_area_struct *vma)
 
 struct file_operations sf_reg_fops =
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 16, 0)
+    .read        = new_sync_read,
+    .write       = new_sync_write,
+    .read_iter   = sf_file_read,
+    .write_iter  = sf_file_write,
+#else
     .read        = sf_reg_read,
-    .open        = sf_reg_open,
     .write       = sf_reg_write,
+    .aio_read    = generic_file_aio_read,
+    .aio_write   = generic_file_aio_write,
+#endif
+    .open        = sf_reg_open,
     .release     = sf_reg_release,
     .mmap        = sf_reg_mmap,
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 0)
 # if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 23)
-    .splice_read = generic_file_splice_read,
+    .splice_read = sf_file_splice_read,
 # else
     .sendfile    = generic_file_sendfile,
-# endif
-# if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 16, 0)
-    .read_iter   = generic_file_read_iter,
-    .write_iter  = generic_file_write_iter,
-# else
-    .aio_read    = generic_file_aio_read,
-    .aio_write   = generic_file_aio_write,
 # endif
 # if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 35)
     .fsync       = noop_fsync,
 # else
     .fsync       = simple_sync_file,
 # endif
-    .llseek      = generic_file_llseek,
+    .llseek      = sf_file_llseek,
 #endif
 };
 
@@ -632,6 +714,118 @@ static int sf_readpage(struct file *file, struct page *page)
     unlock_page(page);
     return 0;
 }
+
+static int sf_readpages(struct file *file, struct address_space *mapping,
+                        struct list_head *pages, unsigned nr_pages)
+{
+    RTCCPHYS tmp_phys;
+    struct dentry *dentry = file->f_path.dentry;
+    struct inode *inode = dentry->d_inode;
+    struct sf_glob_info *sf_g = GET_GLOB_INFO(inode->i_sb);
+    struct sf_reg_info *sf_r  = file->private_data;
+    //struct page *physbuf = 0;
+    void *physbuf;
+    int bufsize;
+    int bufsize2;
+    size_t tmp_size;
+    pgoff_t buf_startindex = 0;
+    pgoff_t pages_in_buf = 0;
+    int err = 0;
+    //char *buf;
+
+
+    /* first try to get everything in one read */
+    // 最大4ページ, 16KB(4 * 4 KB)
+    bufsize2 = PAGE_SIZE * (list_entry(pages->next, struct page, lru)->index
+                            - list_entry(pages->prev, struct page, lru)->index);
+    bufsize = PAGE_SIZE * nr_pages;
+    //printk(KERN_ALERT "nr_pages: %d \n", nr_pages);
+    //printk(KERN_ALERT "PAGE_SIZE 1: %d \n", bufsize);
+    //printk(KERN_ALERT "PAGE_SIZE 2: %d \n", bufsize2);
+    //printk(KERN_ALERT "PAGE_SIZE 3: %d \n", PAGE_SIZE);
+    if (bufsize > 32 * PAGE_SIZE)
+        bufsize = 32 * PAGE_SIZE;
+
+    if (!bufsize)
+        return 0;
+
+    // 読み込みたいサイズ全体は, bufsize
+    // 一度に読み込めるサイズは, tmp_size
+    // 書き込む先, physbuf
+
+    //printk(KERN_ALERT "karino1 \n");
+    //physbuf = alloc_pages_exact(bufsize, GFP_KERNEL);
+    physbuf = alloc_bounce_buffer(&tmp_size, &tmp_phys, bufsize, __PRETTY_FUNCTION__);
+    //printk(KERN_ALERT "karino2 \n");
+    if (!physbuf)
+        return -ENOMEM;
+
+
+    while (!list_empty(pages))
+    {
+        //printk(KERN_ALERT "pages loop \n");
+        //struct page *page = list_first_entry(pages, struct page, lru);
+        // from read_pages@mm/readahead.c
+        //struct page *page = list_first_entry(pages, struct page, lru);
+        struct page *page = list_entry((pages)->prev, struct page, lru);
+        loff_t off = (loff_t) page->index << PAGE_SHIFT;
+        list_del(&page->lru);
+        if (add_to_page_cache_lru(page, mapping, page->index, GFP_KERNEL))
+        {
+            page_cache_release(page);
+            continue;
+        }
+        //page_cache_release(page);
+
+
+        /* read the next chunk if needed */
+        if (page->index >= buf_startindex + pages_in_buf)
+        {
+            //uint32_t nread = bufsize; // physbuf : 16Kまでの値, bufsize : 読み込むページ全体
+            uint32_t nread = tmp_size;
+            err = sf_reg_read_aux(__func__, sf_g, sf_r, physbuf, &nread, off);
+            if (err || nread == 0)
+                break;
+            /* if (err || nread == 0){ */
+            /*     free_bounce_buffer(physbuf); */
+            /*     return err; */
+            /* } */
+
+            buf_startindex = page->index;
+            pages_in_buf = nread >> PAGE_SHIFT; //これはどういう意味なんだろう. addressに変換してるんだろうと思うが.
+            /* fix up possible partial page at end */  // 最後が4Kもない場合.
+            if (nread != PAGE_ALIGN(nread))
+            {
+                pages_in_buf++;
+                memset(physbuf + nread, 0, (pages_in_buf << PAGE_SHIFT) - nread);
+            }
+        }
+        copy_page(page_address(page),
+                  physbuf + ((page->index - buf_startindex) << PAGE_SHIFT));
+        //if (copy_to_user(page_address(page), 
+        //          physbuf + ((page->index - buf_startindex) << PAGE_SHIFT), PAGE_SIZE))
+//        printk(KERN_ALERT "physbuf %p \n", physbuf);
+//        printk(KERN_ALERT "physbuf 2 %p \n", physbuf + ((page->index - buf_startindex) << PAGE_SHIFT));
+//        if (copy_to_user(buf, physbuf + ((page->index - buf_startindex) << PAGE_SHIFT), (uint32_t)PAGE_SIZE))
+//        {
+//            err = -EFAULT;
+//            free_bounce_buffer(physbuf); 
+//                  return err;
+//        }
+//
+
+
+        flush_dcache_page(page);
+        SetPageUptodate(page);
+        unlock_page(page);
+        page_cache_release(page);
+    }
+    //free_pages_exact(physbuf, bufsize);
+    free_bounce_buffer(physbuf);
+    return err;
+}
+
+
 
 static int
 sf_writepage(struct page *page, struct writeback_control *wbc)
@@ -722,6 +916,7 @@ int sf_write_end(struct file *file, struct address_space *mapping, loff_t pos,
 struct address_space_operations sf_reg_aops =
 {
     .readpage      = sf_readpage,
+    .readpages     = sf_readpages,
     .writepage     = sf_writepage,
 # if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 24)
     .write_begin   = sf_write_begin,
