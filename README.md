@@ -13,3 +13,6 @@ INSTALL_VER='5.0.4'
 sudo /etc/init.d/vboxadd setup
 ```
 + 再起動
+
+## その他
++ linux kernel 3.16.7でしか確認してない.
