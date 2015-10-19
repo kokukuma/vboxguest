@@ -723,7 +723,6 @@ static int sf_readpages(struct file *file, struct address_space *mapping,
     struct inode *inode = dentry->d_inode;
     struct sf_glob_info *sf_g = GET_GLOB_INFO(inode->i_sb);
     struct sf_reg_info *sf_r  = file->private_data;
-    //struct page *physbuf = 0;
     void *physbuf;
     int bufsize;
     int bufsize2;
@@ -731,42 +730,25 @@ static int sf_readpages(struct file *file, struct address_space *mapping,
     pgoff_t buf_startindex = 0;
     pgoff_t pages_in_buf = 0;
     int err = 0;
-    //char *buf;
 
 
     /* first try to get everything in one read */
-    // 最大4ページ, 16KB(4 * 4 KB)
     bufsize2 = PAGE_SIZE * (list_entry(pages->next, struct page, lru)->index
                             - list_entry(pages->prev, struct page, lru)->index);
     bufsize = PAGE_SIZE * nr_pages;
-    //printk(KERN_ALERT "nr_pages: %d \n", nr_pages);
-    //printk(KERN_ALERT "PAGE_SIZE 1: %d \n", bufsize);
-    //printk(KERN_ALERT "PAGE_SIZE 2: %d \n", bufsize2);
-    //printk(KERN_ALERT "PAGE_SIZE 3: %d \n", PAGE_SIZE);
     if (bufsize > 32 * PAGE_SIZE)
         bufsize = 32 * PAGE_SIZE;
 
     if (!bufsize)
         return 0;
 
-    // 読み込みたいサイズ全体は, bufsize
-    // 一度に読み込めるサイズは, tmp_size
-    // 書き込む先, physbuf
-
-    //printk(KERN_ALERT "karino1 \n");
-    //physbuf = alloc_pages_exact(bufsize, GFP_KERNEL);
     physbuf = alloc_bounce_buffer(&tmp_size, &tmp_phys, bufsize, __PRETTY_FUNCTION__);
-    //printk(KERN_ALERT "karino2 \n");
     if (!physbuf)
         return -ENOMEM;
 
 
     while (!list_empty(pages))
     {
-        //printk(KERN_ALERT "pages loop \n");
-        //struct page *page = list_first_entry(pages, struct page, lru);
-        // from read_pages@mm/readahead.c
-        //struct page *page = list_first_entry(pages, struct page, lru);
         struct page *page = list_entry((pages)->prev, struct page, lru);
         loff_t off = (loff_t) page->index << PAGE_SHIFT;
         list_del(&page->lru);
@@ -775,25 +757,17 @@ static int sf_readpages(struct file *file, struct address_space *mapping,
             page_cache_release(page);
             continue;
         }
-        //page_cache_release(page);
-
 
         /* read the next chunk if needed */
         if (page->index >= buf_startindex + pages_in_buf)
         {
-            //uint32_t nread = bufsize; // physbuf : 16Kまでの値, bufsize : 読み込むページ全体
             uint32_t nread = tmp_size;
             err = sf_reg_read_aux(__func__, sf_g, sf_r, physbuf, &nread, off);
             if (err || nread == 0)
                 break;
-            /* if (err || nread == 0){ */
-            /*     free_bounce_buffer(physbuf); */
-            /*     return err; */
-            /* } */
 
             buf_startindex = page->index;
-            pages_in_buf = nread >> PAGE_SHIFT; //これはどういう意味なんだろう. addressに変換してるんだろうと思うが.
-            /* fix up possible partial page at end */  // 最後が4Kもない場合.
+            pages_in_buf = nread >> PAGE_SHIFT;
             if (nread != PAGE_ALIGN(nread))
             {
                 pages_in_buf++;
@@ -802,25 +776,12 @@ static int sf_readpages(struct file *file, struct address_space *mapping,
         }
         copy_page(page_address(page),
                   physbuf + ((page->index - buf_startindex) << PAGE_SHIFT));
-        //if (copy_to_user(page_address(page), 
-        //          physbuf + ((page->index - buf_startindex) << PAGE_SHIFT), PAGE_SIZE))
-//        printk(KERN_ALERT "physbuf %p \n", physbuf);
-//        printk(KERN_ALERT "physbuf 2 %p \n", physbuf + ((page->index - buf_startindex) << PAGE_SHIFT));
-//        if (copy_to_user(buf, physbuf + ((page->index - buf_startindex) << PAGE_SHIFT), (uint32_t)PAGE_SIZE))
-//        {
-//            err = -EFAULT;
-//            free_bounce_buffer(physbuf); 
-//                  return err;
-//        }
-//
-
 
         flush_dcache_page(page);
         SetPageUptodate(page);
         unlock_page(page);
         page_cache_release(page);
     }
-    //free_pages_exact(physbuf, bufsize);
     free_bounce_buffer(physbuf);
     return err;
 }
