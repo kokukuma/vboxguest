@@ -3,7 +3,7 @@
 ```
 git clone https://github.com/kokukuma/vboxguest
 ```
-+ /var/lib/VBoxGuestAdditions/config に以下を書き込む.
++ /var/lib/VBoxGuestAdditions/config を修正する.
 ```
 INSTALL_DIR='/home/vagrant/vboxguest'
 INSTALL_VER='5.0.4'
