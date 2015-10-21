@@ -422,6 +422,8 @@ int sf_setattr(struct dentry *dentry, struct iattr *iattr)
     if (RT_FAILURE(rc))
         LogFunc(("vboxCallClose(%s) failed rc=%Rrc\n", sf_i->path->String.utf8, rc));
 
+    // To get the host dentry forcibly.
+    dentry->d_time = 0;
     return sf_inode_revalidate(dentry);
 
 fail1:
