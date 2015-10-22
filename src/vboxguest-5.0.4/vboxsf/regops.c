@@ -860,10 +860,10 @@ static int sf_want_read_modify_write(struct file *file, struct page *page,
     unsigned int offset = pos & (PAGE_CACHE_SIZE - 1);
     unsigned int end = offset + len;
 
-    if ((file->f_mode & FMODE_READ) &&    /* open for read? */
-        !PageUptodate(page) &&        /* Uptodate? */
-        !PagePrivate(page) &&        /* i/o request already? */
-        pglen &&                /* valid bytes of file? */
+    if ((file->f_mode & FMODE_READ) &&  /* open for read? */
+        !PageUptodate(page) &&          /* Uptodate? */
+        !PagePrivate(page) &&           /* i/o request already? */
+        pglen &&                        /* valid bytes of file? */
         (end < pglen || offset))        /* replace all valid bytes? */
         return 1;
     return 0;
@@ -883,11 +883,7 @@ start:
         return -ENOMEM;
     *pagep = page;
 
-    if (ret) {
-        unlock_page(page);
-        page_cache_release(page);
-    } else if (!once_thru &&
-           sf_want_read_modify_write(file, page, pos, len)) {
+    if (!once_thru && sf_want_read_modify_write(file, page, pos, len)) {
         once_thru = 1;
         ret = sf_readpage(file, page);
         page_cache_release(page);
