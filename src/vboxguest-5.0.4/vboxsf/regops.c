@@ -832,13 +832,71 @@ out:
 }
 
 # if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 24)
+
+/*
+ * Determine the number of bytes of data the page contains
+ */
+static inline
+unsigned int sf_page_length(struct page *page)
+{
+    //loff_t i_size = i_size_read(page_file_mapping(page)->host);
+    loff_t i_size = page->mapping->host->i_size;
+
+    if (i_size > 0) {
+        pgoff_t page_index = page_file_index(page);
+        pgoff_t end_index = (i_size - 1) >> PAGE_CACHE_SHIFT;
+        if (page_index < end_index)
+            return PAGE_CACHE_SIZE;
+        if (page_index == end_index)
+            return ((i_size - 1) & ~PAGE_CACHE_MASK) + 1;
+    }
+    return 0;
+}
+
+static int sf_want_read_modify_write(struct file *file, struct page *page,
+            loff_t pos, unsigned len)
+{
+    unsigned int pglen = sf_page_length(page);
+    unsigned int offset = pos & (PAGE_CACHE_SIZE - 1);
+    unsigned int end = offset + len;
+
+    if ((file->f_mode & FMODE_READ) &&    /* open for read? */
+        !PageUptodate(page) &&        /* Uptodate? */
+        !PagePrivate(page) &&        /* i/o request already? */
+        pglen &&                /* valid bytes of file? */
+        (end < pglen || offset))        /* replace all valid bytes? */
+        return 1;
+    return 0;
+}
+
 int sf_write_begin(struct file *file, struct address_space *mapping, loff_t pos,
                    unsigned len, unsigned flags, struct page **pagep, void **fsdata)
 {
-    TRACE();
+    int ret;
+    pgoff_t index = pos >> PAGE_CACHE_SHIFT;
+    struct page *page;
+    int once_thru = 0;
 
-    return simple_write_begin(file, mapping, pos, len, flags, pagep, fsdata);
+start:
+    page = grab_cache_page_write_begin(mapping, index, flags);
+    if (!page)
+        return -ENOMEM;
+    *pagep = page;
+
+    if (ret) {
+        unlock_page(page);
+        page_cache_release(page);
+    } else if (!once_thru &&
+           sf_want_read_modify_write(file, page, pos, len)) {
+        once_thru = 1;
+        ret = sf_readpage(file, page);
+        page_cache_release(page);
+        if (!ret)
+            goto start;
+    }
+    return ret;
 }
+
 
 int sf_write_end(struct file *file, struct address_space *mapping, loff_t pos,
                  unsigned len, unsigned copied, struct page *page, void *fsdata)
@@ -848,6 +906,7 @@ int sf_write_end(struct file *file, struct address_space *mapping, loff_t pos,
     struct sf_reg_info *sf_r = file->private_data;
     void *buf;
     unsigned from = pos & (PAGE_SIZE - 1);
+    unsigned to = from + len;
     uint32_t nwritten = len;
     int err;
 
@@ -857,8 +916,23 @@ int sf_write_end(struct file *file, struct address_space *mapping, loff_t pos,
     err = sf_reg_write_aux(__func__, sf_g, sf_r, buf+from, &nwritten, pos);
     kunmap(page);
 
-    if (!PageUptodate(page) && err == PAGE_SIZE)
-        SetPageUptodate(page);
+
+    if (!PageUptodate(page)) {
+        unsigned pglen = sf_page_length(page);
+
+        if (pglen == 0) {
+            zero_user_segments(page, 0, from, to, PAGE_CACHE_SIZE);
+            SetPageUptodate(page);
+        } else if (to >= pglen) {
+            zero_user_segment(page, to, PAGE_CACHE_SIZE);
+            if (from == 0)
+                SetPageUptodate(page);
+        } else
+            zero_user_segment(page, pglen, PAGE_CACHE_SIZE);
+    }
+
+    /* if (!PageUptodate(page) && err == PAGE_SIZE) */
+    /*     SetPageUptodate(page); */
 
     if (err >= 0) {
         pos += nwritten;
