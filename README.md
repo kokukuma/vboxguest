@@ -13,23 +13,27 @@
 + バグ修正
   + mountオプション`ttl>0`設定時, permissionの反映が遅くなるバグの解消
 
-## install
-+ vboxguestをinstallしておく.
+## install (以下すべて、ゲストOS内での操作)
++ 既存のvboxguestがinstall済みのVMを立てる.
   + [vagrantのvboxguestインストールのガイド](https://docs.vagrantup.com/v2/virtualbox/boxes.html)
-+ このレポジトリを落とす.
-```
-git clone https://github.com/kokukuma/vboxguest
-```
-+ /var/lib/VBoxGuestAdditions/config を修正する.
-```
-INSTALL_DIR='/home/vagrant/vboxguest'
-INSTALL_VER='5.0.4'
-```
-+ vboxadd setup を実行する.
-```
-sudo /etc/init.d/vboxadd setup
-```
-+ 再起動
++ ゲストOS内でvboxguestを更新する.
+  + このレポジトリを落とす.
+    ```
+    git clone https://github.com/kokukuma/vboxguest
+    ```
+    
+  + ゲストOS内で、/var/lib/VBoxGuestAdditions/config を修正する.
+    ```
+    INSTALL_DIR='/home/vagrant/vboxguest'
+    INSTALL_VER='5.0.4'
+    ```
+    
+  + vboxadd setup を実行する.
+    ```
+    sudo /etc/init.d/vboxadd setup
+    ```
+    
++ VMを再起動
 
 ## その他
 + linux kernel 3.16.7でしか確認してない.
