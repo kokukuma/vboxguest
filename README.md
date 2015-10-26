@@ -13,7 +13,7 @@
 + バグ修正
   + mountオプション`ttl>0`設定時, permissionの反映が遅くなるバグの解消
 
-## install (以下すべて、ゲストOS内での操作)
+## install
 + 既存のvboxguestがinstall済みのVMを立てる.
   + [vagrantのvboxguestインストールのガイド](https://docs.vagrantup.com/v2/virtualbox/boxes.html)
 + ゲストOS内でvboxguestを更新する.
