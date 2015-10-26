@@ -19,7 +19,7 @@
 + ゲストOS内でvboxguestを更新する.
   + このレポジトリを落とす.
     ```
-    git clone https://github.com/kokukuma/vboxguest
+    $ git clone https://github.com/kokukuma/vboxguest
     ```
     
   + ゲストOS内で、/var/lib/VBoxGuestAdditions/config を修正する.
@@ -30,7 +30,7 @@
     
   + vboxadd setup を実行する.
     ```
-    sudo /etc/init.d/vboxadd setup
+    $ sudo /etc/init.d/vboxadd setup
     ```
     
 + VMを再起動
