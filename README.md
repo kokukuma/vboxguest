@@ -1,5 +1,22 @@
+## このレポジトリについて
++ vboxsfを速くするための実験的レポジトリ
+
+## 含まれている修正
++ page cacheの利用
+  + read/writeに, `generic_file_read_iter`、`generic_file_write_iter`を利用 
+  + `sf_inode_revalidate`で, 古いキャッシュのクリアを実施.
+  + `jiffies - dentry->d_time = 0`の場合, `sf_stat`を実施しない.
+  + `sf_write_begin`, `sf_write_end`で, page cacheを利用する.
++ read aheadの利用
+  + `ra_pages=32`に設定.
+  + `sf_readpages`の追加.
++ バグ修正
+  + mountオプション`ttl>0`設定時, permissionの反映が遅くなるバグの解消
+
 ## install
-+ vboxguestを落とす.
++ vboxguestをinstallしておく.
+  + [vagrantのvboxguestインストールのガイド](https://docs.vagrantup.com/v2/virtualbox/boxes.html)
++ このレポジトリを落とす.
 ```
 git clone https://github.com/kokukuma/vboxguest
 ```
