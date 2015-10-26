@@ -35,7 +35,6 @@
     
 + VMを再起動
 + インストールできているかどうかの確認
-  + `$ sudo modinfo vboxsf`
   + 適当に大きめのファイル作ってcache効いてるか確認する.
     ```
     $ cd /vagrant/
