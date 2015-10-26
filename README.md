@@ -34,6 +34,36 @@
     ```
     
 + VMを再起動
-
++ インストールできているかどうかの確認
+  + `$ sudo modinfo vboxsf`
+  + 適当に大きめのファイル作ってcache効いてるか確認する.
+    ```
+    $ cd /vagrant/
+    $ dd if=/dev/zero of=5mb bs=1000 count=5000
+    $ ls -lh
+    total 4.8M
+    -rwxrwxrwx 1 vagrant vagrant 4.8M Oct 26 04:00 5mb
+    -rwxrwxrwx 1 vagrant vagrant 3.4K Oct 26 02:08 Vagrantfile
+    $ free -h 
+                 total       used       free     shared    buffers     cached
+    Mem:          494M        61M       432M       4.6M       2.1M        19M
+    -/+ buffers/cache:        40M       454M
+    Swap:         461M         0B       461M
+    $ time cat 5mb >/dev/null
+    
+    real    0m0.047s
+    user    0m0.000s
+    sys     0m0.036s
+    $ free -h
+                 total       used       free     shared    buffers     cached
+    Mem:          494M        66M       428M       4.6M       2.1M        24M <- cacheに乗ってる.
+    -/+ buffers/cache:        40M       454M
+    Swap:         461M         0B       461M
+    $ time cat 5mb >/dev/null
+    
+    real    0m0.006s  <- cache効いてる. 
+    user    0m0.004s
+    sys     0m0.000s
+    ```
 ## その他
 + linux kernel 3.16.7でしか確認してない.
