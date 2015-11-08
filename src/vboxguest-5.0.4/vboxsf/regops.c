@@ -140,6 +140,11 @@ sf_file_write(struct kiocb *iocb, struct iov_iter *iov)
    }
    return result;
 }
+static int
+sf_file_flush(struct file *file, fl_owner_t id)
+{
+    return vfs_fsync(file, 0);
+}
 
 #else /* KERNEL_VERSION >= 3.16.0 */
 /**
@@ -648,6 +653,7 @@ struct file_operations sf_reg_fops =
     .write       = new_sync_write,
     .read_iter   = sf_file_read,
     .write_iter  = sf_file_write,
+    .flush       = sf_file_flush,
 #else
     .read        = sf_reg_read,
     .write       = sf_reg_write,
@@ -862,7 +868,8 @@ static int sf_want_read_modify_write(struct file *file, struct page *page,
 
     if ((file->f_mode & FMODE_READ) &&  /* open for read? */
         !PageUptodate(page) &&          /* Uptodate? */
-        !PagePrivate(page) &&           /* i/o request already? */
+        //!PagePrivate(page) &&           /* i/o request already? */
+        !PageDirty(page) &&             /* page dirty */
         pglen &&                        /* valid bytes of file? */
         (end < pglen || offset))        /* replace all valid bytes? */
         return 1;
@@ -908,9 +915,9 @@ int sf_write_end(struct file *file, struct address_space *mapping, loff_t pos,
 
     TRACE();
 
-    buf = kmap(page);
-    err = sf_reg_write_aux(__func__, sf_g, sf_r, buf+from, &nwritten, pos);
-    kunmap(page);
+    /* buf = kmap(page); */
+    /* err = sf_reg_write_aux(__func__, sf_g, sf_r, buf+from, &nwritten, pos); */
+    /* kunmap(page); */
 
 
     if (!PageUptodate(page)) {
@@ -926,6 +933,9 @@ int sf_write_end(struct file *file, struct address_space *mapping, loff_t pos,
         } else
             zero_user_segment(page, pglen, PAGE_CACHE_SIZE);
     }
+
+    // set dirty
+    __set_page_dirty_nobuffers(page);
 
     /* if (!PageUptodate(page) && err == PAGE_SIZE) */
     /*     SetPageUptodate(page); */
