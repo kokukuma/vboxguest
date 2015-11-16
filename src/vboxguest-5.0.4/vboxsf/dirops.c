@@ -750,6 +750,7 @@ static int sf_rmdir(struct inode *parent, struct dentry *dentry)
 static int sf_rename(struct inode *old_parent, struct dentry *old_dentry,
                      struct inode *new_parent, struct dentry *new_dentry)
 {
+    printk("sf_rename: 0");
     int err = 0, rc = VINF_SUCCESS;
     struct sf_glob_info *sf_g = GET_GLOB_INFO(old_parent->i_sb);
 

@@ -143,7 +143,12 @@ sf_file_write(struct kiocb *iocb, struct iov_iter *iov)
 static int
 sf_file_flush(struct file *file, fl_owner_t id)
 {
-    return vfs_fsync(file, 0);
+    printk("sf_file_flush: karino 2-1\n");
+    return 0;
+    //if ((file->f_mode & FMODE_WRITE) == 0)
+    //    return 0;    
+    //printk("sf_file_flush: karino 2-2\n");
+    //return vfs_fsync(file, 0);
 }
 
 #else /* KERNEL_VERSION >= 3.16.0 */
@@ -351,6 +356,16 @@ sf_file_splice_read(struct file *file, loff_t *offset, struct pipe_inode_info *p
 }
 # endif
 
+# if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 23)
+static int 
+sf_file_fsync(struct file *file, loff_t start, loff_t end,  int datasync)
+{
+    struct inode *inode = file->f_dentry->d_inode; 
+    return filemap_write_and_wait(inode->i_mapping);
+}
+
+
+# endif
 /**
  * Open a regular file.
  *
@@ -501,15 +516,18 @@ static int sf_reg_open(struct inode *inode, struct file *file)
  */
 static int sf_reg_release(struct inode *inode, struct file *file)
 {
+    printk("sf_reg_release: karino 1\n");
     int rc;
     struct sf_reg_info *sf_r;
     struct sf_glob_info *sf_g;
     struct sf_inode_info *sf_i = GET_INODE_INFO(inode);
 
+    printk("sf_reg_release: karino 2\n");
     TRACE();
     sf_g = GET_GLOB_INFO(inode->i_sb);
     sf_r = file->private_data;
 
+    printk("sf_reg_release: karino 3\n");
     BUG_ON(!sf_g);
     BUG_ON(!sf_r);
 
@@ -519,18 +537,24 @@ static int sf_reg_release(struct inode *inode, struct file *file)
      * copy and paste the body of filemap_write_and_wait() here as it was not
      * defined before 2.6.6 and not exported until quite a bit later. */
     /* filemap_write_and_wait(inode->i_mapping); */
+
+    printk("sf_reg_release: karino 4\n");
     if (   inode->i_mapping->nrpages
         && filemap_fdatawrite(inode->i_mapping) != -EIO)
         filemap_fdatawait(inode->i_mapping);
 #endif
+    printk("sf_reg_release: karino 5\n");
     rc = vboxCallClose(&client_handle, &sf_g->map, sf_r->handle);
+    printk("sf_reg_release: karino 6\n");
     if (RT_FAILURE(rc))
         LogFunc(("vboxCallClose failed rc=%Rrc\n", rc));
 
+    printk("sf_reg_release: karino 7\n");
     kfree(sf_r);
     sf_i->file = NULL;
     sf_i->handle = SHFL_HANDLE_NIL;
     file->private_data = NULL;
+    printk("sf_reg_release: karino 8\n");
     return 0;
 }
 
@@ -635,6 +659,8 @@ static struct vm_operations_struct sf_vma_ops =
 
 static int sf_reg_mmap(struct file *file, struct vm_area_struct *vma)
 {
+    struct dentry *dentry;
+    int err;
     TRACE();
     if (vma->vm_flags & VM_SHARED)
     {
@@ -643,9 +669,15 @@ static int sf_reg_mmap(struct file *file, struct vm_area_struct *vma)
     }
 
     vma->vm_ops = &sf_vma_ops;
-    return 0;
+
+    dentry = file->f_path.dentry;
+    err = sf_inode_revalidate(dentry);
+    if (err)
+        return err;
+    return  generic_file_mmap(file, vma);
 }
 
+//.fsync       = sf_file_fsync,
 struct file_operations sf_reg_fops =
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 16, 0)
@@ -653,7 +685,6 @@ struct file_operations sf_reg_fops =
     .write       = new_sync_write,
     .read_iter   = sf_file_read,
     .write_iter  = sf_file_write,
-    .flush       = sf_file_flush,
 #else
     .read        = sf_reg_read,
     .write       = sf_reg_write,
@@ -661,6 +692,7 @@ struct file_operations sf_reg_fops =
     .aio_write   = generic_file_aio_write,
 #endif
     .open        = sf_reg_open,
+    .flush       = sf_file_flush,
     .release     = sf_reg_release,
     .mmap        = sf_reg_mmap,
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 0)
@@ -797,17 +829,26 @@ static int sf_readpages(struct file *file, struct address_space *mapping,
 static int
 sf_writepage(struct page *page, struct writeback_control *wbc)
 {
+    printk("sf_writepage: karino 0 \n");
     struct address_space *mapping = page->mapping;
+    printk("sf_writepage: karino 0-1 mapping=%p \n", mapping);
     struct inode *inode = mapping->host;
+    printk("sf_writepage: karino 0-2 inode=%p, i_ino=%d\n", inode, (int)inode->i_ino );
+
     struct sf_glob_info *sf_g = GET_GLOB_INFO(inode->i_sb);
+    printk("sf_writepage: karino 0-3 sf_g=%p \n", sf_g);
     struct sf_inode_info *sf_i = GET_INODE_INFO(inode);
-    struct file *file = sf_i->file;
+    printk("sf_writepage: karino 0-4 sf_i=%p  \n", sf_i);
+    struct file *file = sf_i->file; 
+    printk("sf_writepage: karino 0-5 file=%p \n", file);
     struct sf_reg_info *sf_r = file->private_data;
+    printk("sf_writepage: karino 0-6 \n");
     char *buf;
     uint32_t nwritten = PAGE_SIZE;
     int end_index = inode->i_size >> PAGE_SHIFT;
     loff_t off = ((loff_t) page->index) << PAGE_SHIFT;
     int err;
+
 
     TRACE();
 
@@ -823,12 +864,14 @@ sf_writepage(struct page *page, struct writeback_control *wbc)
         goto out;
     }
 
+
     if (off > inode->i_size)
         inode->i_size = off;
 
     if (PageError(page))
         ClearPageError(page);
     err = 0;
+
 
 out:
     kunmap(page);
@@ -904,6 +947,7 @@ start:
 int sf_write_end(struct file *file, struct address_space *mapping, loff_t pos,
                  unsigned len, unsigned copied, struct page *page, void *fsdata)
 {
+    printk("sf_write_end: karino 0 \n");
     struct inode *inode = mapping->host;
     struct sf_glob_info *sf_g = GET_GLOB_INFO(inode->i_sb);
     struct sf_reg_info *sf_r = file->private_data;
