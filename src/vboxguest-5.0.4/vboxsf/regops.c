@@ -915,6 +915,119 @@ out:
     return err;
 }
 
+static int
+nfs_writepages(struct address_space *mapping, struct writeback_control *wbc)
+{
+
+	struct pagevec pvec;
+	pgoff_t index;
+	pgoff_t end;		/* Inclusive */
+	int nr_pages;
+
+    RTCCPHYS tmp_phys;
+    void *physbuf;
+    int bufsize;
+    size_t tmp_size;
+    uint32_t to_write = 0;
+
+    pgoff_t buf_startindex = 0;
+
+
+    // TODO: tmp領域を確保する.
+    bufsize = PAGE_SIZE *  wbc->nr_to_write;
+    if (bufsize > 32 * PAGE_SIZE)
+        bufsize = 32 * PAGE_SIZE;
+
+    if (!bufsize)
+        return 0;
+
+    physbuf = alloc_bounce_buffer(&tmp_size, &tmp_phys, bufsize, __PRETTY_FUNCTION__);
+    if (!physbuf)
+        return -ENOMEM;
+
+    // dirty pageを取得する
+    index = wbc->range_start >> PAGE_CACHE_SHIFT;
+    end = wbc->range_end >> PAGE_CACHE_SHIFT;
+
+    pagevec_init(&pvec, 0);
+    nr_pages = pagevec_lookup_tag(&pvec, mapping, &index, PAGECACHE_TAG_DIRTY,
+              min(end - index, (pgoff_t)PAGEVEC_SIZE-1) + 1);
+
+    if (nr_pages == 0)
+        break;
+
+    // writeする.
+    for (i = 0; i < nr_pages; i++) {
+        struct page *page = pvec.pages[i];
+
+        if (to_write != 0){
+            if ( buf_startindex + 1 != page->index || to_write + PAGE_SIZE > tmp_size){
+                loff_t off = ((loff_t)buf_startindex) << PAGE_SHIFT;
+                err = sf_reg_write_aux(__func__, sf_g, sf_r, physbuf, &to_write, off);
+                if (err < 0)
+                {
+                    // TODO: error handle
+                }
+
+                buf_startindex = page->index;
+            }
+        }else{
+            buf_startindex = page->index;
+        }
+
+        lock_page(page);
+
+        // TODO: どんなときに飛ばすかの判断が甘い.
+        if (!PageDirty(page)) {
+            /* someone wrote it for us */
+            unlock_page(page);
+            continue;
+        }
+
+        if (PageWriteback(page)) {
+            if (wbc->sync_mode != WB_SYNC_NONE){
+
+                wait_on_page_writeback(page);
+            }else{
+                unlock_page(page);
+                continue;
+            }
+        }
+
+        // コピーする.
+        copy_page(physbuf + ((page->index - buf_startindex) << PAGE_SHIFT),
+                   page_address(page));
+        to_write += PAGE_SIZE;
+
+        unlock_page(page);
+    }
+
+    pagevec_release(&pvec);
+
+    // サイズ更新
+    if (off > inode->i_size)
+        inode->i_size = off;
+
+    // http://wiki.bit-hive.com/linuxkernelmemo/pg/mpage_writepages()
+    // write_cache_pages @ linux-source-3.16/mm/page-writeback.c
+    // pagevec_lookup_tagでdirty page listを取得
+
+    // ループ内で何をするか?
+    //  1. 連続していない & tmpがまだ余っていないなら、tmpを書き込み.
+    //  2. pageの内容をコピー     <- コピーいらない. アドレスの計算だけだ.
+    //  3. 次へ.
+
+    // 書き込みが終わったら,
+    //     pagevec_release(&pvec);
+    //     dirty flagは自分で下ろす必要あるか？
+
+    // TODO:
+    //      dirtyなpageが連続していた場合、page lockはどうする？ 
+    //      --wbc->nr_to_writeは実行したほうが良い?
+    //      どうやって、連続しているか否かを判断するか？
+    //
+}
+
 # if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 24)
 
 /*
