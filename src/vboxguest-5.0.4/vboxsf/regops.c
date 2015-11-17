@@ -409,7 +409,6 @@ static int sf_reg_open(struct inode *inode, struct file *file)
                            | SHFL_CF_ACT_CREATE_IF_NEW
                            | SHFL_CF_ACT_FAIL_IF_EXISTS
                            | SHFL_CF_ACCESS_READWRITE
-                           | (fDirectory ? SHFL_CF_DIRECTORY : 0)
                            ;
 
         //
@@ -846,6 +845,7 @@ static int sf_readpages(struct file *file, struct address_space *mapping,
 static int
 sf_writepage(struct page *page, struct writeback_control *wbc)
 {
+    struct list_head *cur;
     printk("sf_writepage: karino 0 \n");
     struct address_space *mapping = page->mapping;
     printk("sf_writepage: karino 0-1 mapping=%p \n", mapping);
@@ -863,7 +863,7 @@ sf_writepage(struct page *page, struct writeback_control *wbc)
 
     struct sf_reg_info *sf_r;
     list_for_each(cur, &sf_i->regs) {
-        sf_reg_info *sf_r_tmp = list_entry(cur, sf_reg_info, list);
+        struct sf_reg_info *sf_r_tmp = list_entry(cur, struct sf_reg_info, head);
 
         // write可能なやつは一つだけという前提
         if (sf_r_tmp->CreateFlags & SHFL_CF_ACCESS_WRITE) {
