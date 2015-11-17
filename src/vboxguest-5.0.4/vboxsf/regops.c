@@ -860,16 +860,16 @@ sf_writepage(struct page *page, struct writeback_control *wbc)
     //
     /* struct file *file = sf_i->file; */
     /* struct sf_reg_info *sf_r = file->private_data; */
-    sf_i->regs
-    list_for_each(cur, &sf_i->regs) {
-       sf_reg_info *sf_r = list_entry(cur, sf_reg_info, list);
 
-       // TODO: どのreg正しいやつだろうか?
-       if (mode == 0 || finfo->mode & mode) {
-          *handle = finfo->handle;
-          found = TRUE;
-          break;
-       }
+    struct sf_reg_info *sf_r;
+    list_for_each(cur, &sf_i->regs) {
+        sf_reg_info *sf_r_tmp = list_entry(cur, sf_reg_info, list);
+
+        // write可能なやつは一つだけという前提
+        if (sf_r_tmp->CreateFlags & SHFL_CF_ACCESS_WRITE) {
+            sf_r = sf_r_tmp;
+            break;
+        }
     }
 
     printk("sf_writepage: karino 0-6 \n");
