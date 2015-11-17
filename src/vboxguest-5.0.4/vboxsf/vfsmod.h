@@ -59,7 +59,8 @@ struct sf_inode_info
     /* directory content changed, update the whole directory on next sf_getdent */
     int force_reread;
     /* file structure, only valid between open() and release() */
-    struct file *file;
+    //struct file *file;
+    struct list_head regs;
     /* handle valid if a file was created with sf_create_aux until it will
      * be opened with sf_reg_open() */
     SHFLHANDLE handle;
@@ -81,6 +82,8 @@ struct sf_dir_buf
 
 struct sf_reg_info
 {
+    struct list_head head;
+    uint32_t CreateFlags;
     SHFLHANDLE handle;
 };
 

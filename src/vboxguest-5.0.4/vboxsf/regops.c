@@ -405,7 +405,17 @@ static int sf_reg_open(struct inode *inode, struct file *file)
         sf_i->force_restat = 1;
         sf_r->handle = sf_i->handle;
         sf_i->handle = SHFL_HANDLE_NIL;
-        sf_i->file = file;
+        sf_r->CreateFlags = 0
+                           | SHFL_CF_ACT_CREATE_IF_NEW
+                           | SHFL_CF_ACT_FAIL_IF_EXISTS
+                           | SHFL_CF_ACCESS_READWRITE
+                           | (fDirectory ? SHFL_CF_DIRECTORY : 0)
+                           ;
+
+        //
+        //sf_i->file = file;
+        list_add_tail(&sf_r->head, &sf_i->regs);
+
         file->private_data = sf_r;
         return 0;
     }
@@ -502,7 +512,11 @@ static int sf_reg_open(struct inode *inode, struct file *file)
 
     sf_i->force_restat = 1;
     sf_r->handle = params.Handle;
-    sf_i->file = file;
+    //
+    //sf_i->file = file;
+    sf_r->CreateFlags = params.CreateFlags;
+    list_add_tail(&sf_r->head, &sf_i->regs);
+
     file->private_data = sf_r;
     return rc_linux;
 }
@@ -551,7 +565,10 @@ static int sf_reg_release(struct inode *inode, struct file *file)
 
     printk("sf_reg_release: karino 7\n");
     kfree(sf_r);
-    sf_i->file = NULL;
+
+    //sf_i->file = NULL;
+    list_del_init(&sf_r->head);
+
     sf_i->handle = SHFL_HANDLE_NIL;
     file->private_data = NULL;
     printk("sf_reg_release: karino 8\n");
@@ -839,9 +856,22 @@ sf_writepage(struct page *page, struct writeback_control *wbc)
     printk("sf_writepage: karino 0-3 sf_g=%p \n", sf_g);
     struct sf_inode_info *sf_i = GET_INODE_INFO(inode);
     printk("sf_writepage: karino 0-4 sf_i=%p  \n", sf_i);
-    struct file *file = sf_i->file; 
-    printk("sf_writepage: karino 0-5 file=%p \n", file);
-    struct sf_reg_info *sf_r = file->private_data;
+
+    //
+    /* struct file *file = sf_i->file; */
+    /* struct sf_reg_info *sf_r = file->private_data; */
+    sf_i->regs
+    list_for_each(cur, &sf_i->regs) {
+       sf_reg_info *sf_r = list_entry(cur, sf_reg_info, list);
+
+       // TODO: どのreg正しいやつだろうか?
+       if (mode == 0 || finfo->mode & mode) {
+          *handle = finfo->handle;
+          found = TRUE;
+          break;
+       }
+    }
+
     printk("sf_writepage: karino 0-6 \n");
     char *buf;
     uint32_t nwritten = PAGE_SIZE;

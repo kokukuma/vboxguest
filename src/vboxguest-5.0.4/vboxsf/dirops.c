@@ -427,6 +427,8 @@ static struct dentry *sf_lookup(struct inode *parent, struct dentry *dentry
         sf_init_inode(sf_g, inode, &fsinfo);
         sf_new_i->path = path;
 
+        INIT_LIST_HEAD(&sf_new_i->regs);
+
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 4, 25)
         unlock_new_inode(inode);
 #endif
@@ -511,6 +513,9 @@ static int sf_instantiate(struct inode *parent, struct dentry *dentry,
 
     /* Store this handle if we leave the handle open. */
     sf_new_i->handle = handle;
+
+    INIT_LIST_HEAD(&sf_new_i->regs);
+
     return 0;
 
 fail1:
