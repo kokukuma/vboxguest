@@ -216,11 +216,14 @@ int sf_stat(const char *caller, struct sf_glob_info *sf_g,
    update inode attributes */
 int sf_inode_revalidate(struct dentry *dentry)
 {
+    printk("sf_inode_revalidate: karino 0 \n");
     int err;
     struct sf_glob_info *sf_g;
     struct sf_inode_info *sf_i;
     SHFLFSOBJINFO info;
-    time_t old_time;
+    struct timespec guest_time;
+    struct timespec host_time;
+    printk("sf_inode_revalidate: karino 0-2 inode=%p, i_ino=%d\n", dentry->d_inode, (int)dentry->d_inode->i_ino );
 
     TRACE();
     if (!dentry || !dentry->d_inode)
@@ -254,13 +257,21 @@ int sf_inode_revalidate(struct dentry *dentry)
 
     dentry->d_time = jiffies;
 
-    old_time = dentry->d_inode->i_mtime.tv_sec;
-    sf_ftime_from_timespec(&dentry->d_inode->i_mtime, &info.ModificationTime);
+    guest_time = dentry->d_inode->i_mtime;
+    sf_ftime_from_timespec(&host_time, &info.ModificationTime);
 
-    if ( info.cbObject != dentry->d_inode->i_size ||
-              old_time != dentry->d_inode->i_mtime.tv_sec){
+    // ゲストの方が更新時刻が新しいなら、ゲストの更新はしない.
+    // size/更新日時がゲスト・ホストで同じなら、page cacheの開放はしない.
+    printk("guest_time=%d, i_mtime=%d \n", (int)guest_time.tv_sec, (int)host_time.tv_sec);
+    if ( guest_time.tv_sec > host_time.tv_sec ){
+        printk("new guest\n");
+	return 0;
+    } else if ( info.cbObject != dentry->d_inode->i_size ||
+              guest_time.tv_sec < host_time.tv_sec){
+        printk("page reset\n");
         invalidate_inode_pages2(dentry->d_inode->i_mapping);
     }
+    printk("inode reset\n");
 
     sf_init_inode(sf_g, dentry->d_inode, &info);
     sf_i->force_restat = 0;
@@ -290,6 +301,7 @@ sf_dentry_revalidate(struct dentry *dentry, int flags)
         return -ECHILD;
 #endif
 
+    printk("sf_dentry_revalidate: karino 2-1\n");
     if (sf_inode_revalidate(dentry))
         return 0;
 
@@ -305,6 +317,7 @@ int sf_getattr(struct vfsmount *mnt, struct dentry *dentry, struct kstat *kstat)
 {
     int err;
 
+    printk("sf_getattr: karino 2-1\n");
     TRACE();
     err = sf_inode_revalidate(dentry);
     if (err)
@@ -316,6 +329,7 @@ int sf_getattr(struct vfsmount *mnt, struct dentry *dentry, struct kstat *kstat)
 
 int sf_setattr(struct dentry *dentry, struct iattr *iattr)
 {
+    printk("sf_setattr: karino 2-1\n");
     struct sf_glob_info *sf_g;
     struct sf_inode_info *sf_i;
     SHFLCREATEPARMS params;
@@ -325,6 +339,7 @@ int sf_setattr(struct dentry *dentry, struct iattr *iattr)
 
     TRACE();
 
+    struct inode *inode = dentry->d_inode;
     sf_g = GET_GLOB_INFO(dentry->d_inode->i_sb);
     sf_i = GET_INODE_INFO(dentry->d_inode);
     err  = 0;
@@ -417,6 +432,13 @@ int sf_setattr(struct dentry *dentry, struct iattr *iattr)
             goto fail1;
         }
     }
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 4, 25)
+    printk("   writeback 1 \n");
+    if (   inode->i_mapping->nrpages
+        && filemap_fdatawrite(inode->i_mapping) != -EIO)
+        filemap_fdatawait(inode->i_mapping);
+#endif
 
     rc = vboxCallClose(&client_handle, &sf_g->map, params.Handle);
     if (RT_FAILURE(rc))
