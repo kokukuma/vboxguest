@@ -101,6 +101,7 @@ sf_file_read(struct kiocb *iocb, struct iov_iter *iov)
    int err;
    struct dentry *dentry;
 
+   printk("sf_file_read: karino 2-1\n");
    dentry = iocb->ki_filp->f_path.dentry;
    err = sf_inode_revalidate(dentry);
    if (err)
@@ -126,6 +127,7 @@ sf_file_write(struct kiocb *iocb, struct iov_iter *iov)
    struct dentry *dentry = file->f_path.dentry;
    struct inode *inode = dentry->d_inode;
 
+   printk("sf_file_write: karino 2-1\n");
    err = sf_inode_revalidate(dentry);
    if (err)
        return err;
@@ -334,6 +336,7 @@ sf_file_llseek(struct file *file, loff_t offset, int origin)
    int err;
    struct dentry *dentry;
 
+   printk("sf_file_llseek: karino 2-1\n");
    dentry = file->f_path.dentry;
    err = sf_inode_revalidate(dentry);
    if (err)
@@ -348,6 +351,7 @@ sf_file_splice_read(struct file *file, loff_t *offset, struct pipe_inode_info *p
    int err;
    struct dentry *dentry;
 
+   printk("sf_file_splice_read: karino 2-1\n");
    dentry = file->f_path.dentry;
    err = sf_inode_revalidate(dentry);
    if (err)
@@ -686,6 +690,7 @@ static int sf_reg_mmap(struct file *file, struct vm_area_struct *vma)
 
     vma->vm_ops = &sf_vma_ops;
 
+    printk("sf_reg_mmap: karino 2-1\n");
     dentry = file->f_path.dentry;
     err = sf_inode_revalidate(dentry);
     if (err)
@@ -985,7 +990,9 @@ int sf_write_end(struct file *file, struct address_space *mapping, loff_t pos,
     unsigned from = pos & (PAGE_SIZE - 1);
     unsigned to = from + len;
     uint32_t nwritten = len;
+    struct timespec ct = CURRENT_TIME;
     int err;
+    printk("sf_write_end: karino 0-2 inode=%p, i_ino=%d\n", inode, (int)inode->i_ino );
 
     TRACE();
 
@@ -1014,11 +1021,15 @@ int sf_write_end(struct file *file, struct address_space *mapping, loff_t pos,
     /* if (!PageUptodate(page) && err == PAGE_SIZE) */
     /*     SetPageUptodate(page); */
 
-    if (err >= 0) {
-        pos += nwritten;
-        if (pos > inode->i_size)
-            inode->i_size = pos;
-    }
+    //if (err >= 0) {
+    //    pos += nwritten;
+    //    if (pos > inode->i_size)
+    //        inode->i_size = pos;
+    //}
+    // ファイルサイズと更新日時の更新
+    pos += nwritten;
+    if (pos > inode->i_size)
+        inode->i_size = pos;
 
     unlock_page(page);
     page_cache_release(page);
