@@ -223,7 +223,6 @@ int sf_inode_revalidate(struct dentry *dentry)
     SHFLFSOBJINFO info;
     struct timespec guest_time;
     struct timespec host_time;
-    printk("sf_inode_revalidate: karino 0-2 inode=%p, i_ino=%d\n", dentry->d_inode, (int)dentry->d_inode->i_ino );
 
     TRACE();
     if (!dentry || !dentry->d_inode)
@@ -231,6 +230,7 @@ int sf_inode_revalidate(struct dentry *dentry)
         LogFunc(("no dentry(%p) or inode(%p)\n", dentry, dentry->d_inode));
         return -EINVAL;
     }
+    printk("sf_inode_revalidate: karino 0-2 inode=%p, i_ino=%d\n", dentry->d_inode, (int)dentry->d_inode->i_ino );
 
     sf_g = GET_GLOB_INFO(dentry->d_inode->i_sb);
     sf_i = GET_INODE_INFO(dentry->d_inode);
