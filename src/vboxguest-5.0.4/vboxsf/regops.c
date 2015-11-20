@@ -915,23 +915,43 @@ out:
     return err;
 }
 
+#include <linux/pagevec.h>
 static int
-nfs_writepages(struct address_space *mapping, struct writeback_control *wbc)
+sf_writepages(struct address_space *mapping, struct writeback_control *wbc)
 {
 
-	struct pagevec pvec;
-	pgoff_t index;
-	pgoff_t end;		/* Inclusive */
-	int nr_pages;
+    struct pagevec pvec;
+    pgoff_t index;
+    pgoff_t end;		/* Inclusive */
+    int nr_pages;
 
     RTCCPHYS tmp_phys;
     void *physbuf;
     int bufsize;
     size_t tmp_size;
     uint32_t to_write = 0;
+    int err;
+    int i;
+    loff_t off;
+    struct list_head *cur;
 
     pgoff_t buf_startindex = 0;
 
+    struct inode *inode = mapping->host;
+    struct sf_glob_info *sf_g = GET_GLOB_INFO(inode->i_sb);
+    struct sf_inode_info *sf_i = GET_INODE_INFO(inode);
+
+    // TODO: これ２つあるし外に出す.
+    struct sf_reg_info *sf_r;
+    list_for_each(cur, &sf_i->regs) {
+        struct sf_reg_info *sf_r_tmp = list_entry(cur, struct sf_reg_info, head);
+
+        // write可能なやつは一つだけという前提
+        if (sf_r_tmp->CreateFlags & SHFL_CF_ACCESS_WRITE) {
+            sf_r = sf_r_tmp;
+            break;
+        }
+    }
 
     // TODO: tmp領域を確保する.
     bufsize = PAGE_SIZE *  wbc->nr_to_write;
@@ -954,7 +974,7 @@ nfs_writepages(struct address_space *mapping, struct writeback_control *wbc)
               min(end - index, (pgoff_t)PAGEVEC_SIZE-1) + 1);
 
     if (nr_pages == 0)
-        break;
+        return -ENOMEM;
 
     // writeする.
     for (i = 0; i < nr_pages; i++) {
@@ -962,7 +982,7 @@ nfs_writepages(struct address_space *mapping, struct writeback_control *wbc)
 
         if (to_write != 0){
             if ( buf_startindex + 1 != page->index || to_write + PAGE_SIZE > tmp_size){
-                loff_t off = ((loff_t)buf_startindex) << PAGE_SHIFT;
+                off = ((loff_t)buf_startindex) << PAGE_SHIFT;
                 err = sf_reg_write_aux(__func__, sf_g, sf_r, physbuf, &to_write, off);
                 if (err < 0)
                 {
