@@ -966,21 +966,12 @@ sf_writepages(struct address_space *mapping, struct writeback_control *wbc)
     printk("sf_writepages: karino 1\n");
     int end_index = inode->i_size >> PAGE_SHIFT;
 
+
+    // 書き込み可能なhandlを取得
     struct sf_reg_info *sf_r = sf_gethandle(sf_i);
     printk("sf_writepages: sf_r=%p\n", sf_r);
     if (!sf_r)
         return -ENOMEM;
-    //struct list_head *cur;
-    //list_for_each(cur, &sf_i->regs) {
-    //    struct sf_reg_info *sf_r_tmp = list_entry(cur, struct sf_reg_info, head);
-    //    printk("sf_writepages: karino 1: sf_r: %p\n", sf_r_tmp);
-
-    //    // write可能なやつは一つだけという前提
-    //    if (sf_r_tmp->CreateFlags & SHFL_CF_ACCESS_WRITE) {
-    //        sf_r = sf_r_tmp;
-    //        break;
-    //    }
-    //}
     printk("sf_writepages: karino 0-2 sf_g=%p, sf_r=%p\n", sf_g,  sf_r);
     printk("sf_writepages: karino 0-2 sf_g->map=%p, sf_r->handle=%p\n", &sf_g->map,  &sf_r->handle);
 
@@ -1032,6 +1023,7 @@ sf_writepages(struct address_space *mapping, struct writeback_control *wbc)
 
                 // stratを今のindexに.
                 buf_startindex = page->index;
+                to_write = 0;
             }
         }else{
             buf_startindex = page->index;
