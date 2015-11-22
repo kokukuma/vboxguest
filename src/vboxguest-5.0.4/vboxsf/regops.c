@@ -846,11 +846,26 @@ static int sf_readpages(struct file *file, struct address_space *mapping,
 }
 
 
+static struct sf_reg_info *
+sf_gethandle(struct sf_inode_info *sf_i)
+{
+    struct list_head *cur;
+    list_for_each(cur, &sf_i->regs) {
+        struct sf_reg_info *sf_r_tmp = list_entry(cur, struct sf_reg_info, head);
+
+        // write可能なやつは一つだけという前提
+        if (sf_r_tmp->CreateFlags & SHFL_CF_ACCESS_WRITE) {
+            printk("     sf_gethandle: sf_r_tmp=%p\n", sf_r_tmp);
+            return sf_r_tmp;
+        }
+    }
+    return NULL;
+}
+
 
 static int
 sf_writepage(struct page *page, struct writeback_control *wbc)
 {
-    struct list_head *cur;
     printk("sf_writepage: karino 0 \n");
     struct address_space *mapping = page->mapping;
     printk("sf_writepage: karino 0-1 mapping=%p \n", mapping);
@@ -866,23 +881,31 @@ sf_writepage(struct page *page, struct writeback_control *wbc)
     /* struct file *file = sf_i->file; */
     /* struct sf_reg_info *sf_r = file->private_data; */
 
-    struct sf_reg_info *sf_r;
-    list_for_each(cur, &sf_i->regs) {
-        struct sf_reg_info *sf_r_tmp = list_entry(cur, struct sf_reg_info, head);
+    int err;
+    struct sf_reg_info *sf_r = sf_gethandle(sf_i);
+    if (!sf_r)
+        return -ENOMEM;
+    //struct sf_reg_info *sf_r;
+    //err = sf_gethandle(sf_i, sf_r);
+    //if (err < 0)
+    //    return -ENOMEM;
 
-        // write可能なやつは一つだけという前提
-        if (sf_r_tmp->CreateFlags & SHFL_CF_ACCESS_WRITE) {
-            sf_r = sf_r_tmp;
-            break;
-        }
-    }
+    //struct list_head *cur;
+    //list_for_each(cur, &sf_i->regs) {
+    //    struct sf_reg_info *sf_r_tmp = list_entry(cur, struct sf_reg_info, head);
+
+    //    // write可能なやつは一つだけという前提
+    //    if (sf_r_tmp->CreateFlags & SHFL_CF_ACCESS_WRITE) {
+    //        sf_r = sf_r_tmp;
+    //        break;
+    //    }
+    //}
 
     printk("sf_writepage: karino 0-6 \n");
     char *buf;
     uint32_t nwritten = PAGE_SIZE;
     int end_index = inode->i_size >> PAGE_SHIFT;
     loff_t off = ((loff_t) page->index) << PAGE_SHIFT;
-    int err;
 
 
     TRACE();
@@ -919,39 +942,49 @@ out:
 static int
 sf_writepages(struct address_space *mapping, struct writeback_control *wbc)
 {
-
-    struct pagevec pvec;
-    pgoff_t index;
-    pgoff_t end;		/* Inclusive */
-    int nr_pages;
-
-    RTCCPHYS tmp_phys;
-    void *physbuf;
-    int bufsize;
-    size_t tmp_size;
-    uint32_t to_write = 0;
-    int err;
-    int i;
-    loff_t off;
-    struct list_head *cur;
-
-    pgoff_t buf_startindex = 0;
-
+    printk("sf_writepages: karino 0\n");
     struct inode *inode = mapping->host;
     struct sf_glob_info *sf_g = GET_GLOB_INFO(inode->i_sb);
     struct sf_inode_info *sf_i = GET_INODE_INFO(inode);
+    printk("sf_writepages: karino 0-2 sf_g=%p, sf_i=%p\n", sf_g,  sf_i);
 
-    // TODO: これ２つあるし外に出す.
-    struct sf_reg_info *sf_r;
-    list_for_each(cur, &sf_i->regs) {
-        struct sf_reg_info *sf_r_tmp = list_entry(cur, struct sf_reg_info, head);
+    printk("sf_writepages: karino 0-1 inode=%p, i_ino=%d\n", inode, (int)inode->i_ino );
+    struct pagevec pvec;
 
-        // write可能なやつは一つだけという前提
-        if (sf_r_tmp->CreateFlags & SHFL_CF_ACCESS_WRITE) {
-            sf_r = sf_r_tmp;
-            break;
-        }
-    }
+    pgoff_t index, end;
+    pgoff_t buf_startindex = 0;
+
+    RTCCPHYS tmp_phys;
+
+    int nr_pages, err, i;
+    int bufsize;
+
+    void *physbuf;
+    size_t tmp_size;
+    uint32_t to_write = 0;
+    loff_t off;
+    printk("sf_writepages: karino 1\n");
+    int end_index = inode->i_size >> PAGE_SHIFT;
+
+    struct sf_reg_info *sf_r = sf_gethandle(sf_i);
+    printk("sf_writepages: sf_r=%p\n", sf_r);
+    if (!sf_r)
+        return -ENOMEM;
+    //struct list_head *cur;
+    //list_for_each(cur, &sf_i->regs) {
+    //    struct sf_reg_info *sf_r_tmp = list_entry(cur, struct sf_reg_info, head);
+    //    printk("sf_writepages: karino 1: sf_r: %p\n", sf_r_tmp);
+
+    //    // write可能なやつは一つだけという前提
+    //    if (sf_r_tmp->CreateFlags & SHFL_CF_ACCESS_WRITE) {
+    //        sf_r = sf_r_tmp;
+    //        break;
+    //    }
+    //}
+    printk("sf_writepages: karino 0-2 sf_g=%p, sf_r=%p\n", sf_g,  sf_r);
+    printk("sf_writepages: karino 0-2 sf_g->map=%p, sf_r->handle=%p\n", &sf_g->map,  &sf_r->handle);
+
+    printk("sf_writepages: karino 2\n");
 
     // TODO: tmp領域を確保する.
     bufsize = PAGE_SIZE *  wbc->nr_to_write;
@@ -961,34 +994,43 @@ sf_writepages(struct address_space *mapping, struct writeback_control *wbc)
     if (!bufsize)
         return 0;
 
+    // tmp_phys: virt_to_phys
     physbuf = alloc_bounce_buffer(&tmp_size, &tmp_phys, bufsize, __PRETTY_FUNCTION__);
     if (!physbuf)
         return -ENOMEM;
+    printk("sf_writepages: karino 3: tmp_size=%d\n", tmp_size);
 
     // dirty pageを取得する
     index = wbc->range_start >> PAGE_CACHE_SHIFT;
     end = wbc->range_end >> PAGE_CACHE_SHIFT;
 
+    printk("sf_writepages: karino 4\n");
     pagevec_init(&pvec, 0);
     nr_pages = pagevec_lookup_tag(&pvec, mapping, &index, PAGECACHE_TAG_DIRTY,
               min(end - index, (pgoff_t)PAGEVEC_SIZE-1) + 1);
 
+    printk("sf_writepages: karino 5\n");
     if (nr_pages == 0)
         return -ENOMEM;
 
     // writeする.
     for (i = 0; i < nr_pages; i++) {
+        printk("    karino 1\n");
         struct page *page = pvec.pages[i];
+        printk("    karino 2: to_write=%d, buf_startindex=%d page->index=%d \n", (int)to_write, (int)buf_startindex, (int)page->index);
 
         if (to_write != 0){
+            // pageが連続していない or tmpサイズを超えてしまう.
             if ( buf_startindex + 1 != page->index || to_write + PAGE_SIZE > tmp_size){
-                off = ((loff_t)buf_startindex) << PAGE_SHIFT;
+               // tmpに溜め込んだ分をwrite
+                off = (loff_t) buf_startindex << PAGE_SHIFT;
                 err = sf_reg_write_aux(__func__, sf_g, sf_r, physbuf, &to_write, off);
                 if (err < 0)
                 {
-                    // TODO: error handle
+    		    return err;
                 }
 
+                // stratを今のindexに.
                 buf_startindex = page->index;
             }
         }else{
@@ -997,36 +1039,60 @@ sf_writepages(struct address_space *mapping, struct writeback_control *wbc)
 
         lock_page(page);
 
-        // TODO: どんなときに飛ばすかの判断が甘い.
+        printk("    karino 3\n");
         if (!PageDirty(page)) {
             /* someone wrote it for us */
             unlock_page(page);
             continue;
         }
 
+        printk("    karino 4\n");
         if (PageWriteback(page)) {
             if (wbc->sync_mode != WB_SYNC_NONE){
-
                 wait_on_page_writeback(page);
             }else{
                 unlock_page(page);
                 continue;
             }
         }
+        printk("    karino 5\n");
+
+        if (--wbc->nr_to_write <= 0 &&
+            wbc->sync_mode == WB_SYNC_NONE) {
+        	break;
+        }
+        printk("    karino 6\n");
 
         // コピーする.
         copy_page(physbuf + ((page->index - buf_startindex) << PAGE_SHIFT),
                    page_address(page));
-        to_write += PAGE_SIZE;
+        printk("    karino 7: page->index=%d, end_index=%d\n", (int)page->index, (int)end_index);
+	if (page->index >= end_index)
+            to_write += inode->i_size & (PAGE_SIZE-1);
+        else
+            to_write += PAGE_SIZE;
+        printk("    karino 8\n");
 
         unlock_page(page);
     }
 
+    printk("sf_writepages: karino 6: \n");
+    // 最後のtmpを書き込む.
+    off = ((loff_t) buf_startindex) << PAGE_SHIFT;
+    printk("sf_writepages: karino 7: to_write=%d, off=%d \n", (int)to_write, (int)off);
+
+    err = sf_reg_write_aux(__func__, sf_g, sf_r, physbuf, &to_write, off);
+    if (err < 0)
+    {
+        return err;
+    }
+    printk("sf_writepages: karino 8\n");
+
     pagevec_release(&pvec);
 
-    // サイズ更新
-    if (off > inode->i_size)
-        inode->i_size = off;
+    //// サイズ更新は、write_endの段階で終了しているはず.
+    //if (off > inode->i_size)
+    //    inode->i_size = off;
 
     // http://wiki.bit-hive.com/linuxkernelmemo/pg/mpage_writepages()
     // write_cache_pages @ linux-source-3.16/mm/page-writeback.c
@@ -1040,6 +1106,8 @@ sf_writepages(struct address_space *mapping, struct writeback_control *wbc)
     // 書き込みが終わったら,
     //     pagevec_release(&pvec);
     //     dirty flagは自分で下ろす必要あるか？
+    //
+    // filemap_fdatawait_range @ linux-source-3.16/mm/filemap.c 
 
     // TODO:
     //      dirtyなpageが連続していた場合、page lockはどうする？ 
@@ -1177,6 +1245,7 @@ struct address_space_operations sf_reg_aops =
     .readpage      = sf_readpage,
     .readpages     = sf_readpages,
     .writepage     = sf_writepage,
+    .writepages     = sf_writepages,
 # if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 24)
     .write_begin   = sf_write_begin,
     .write_end     = sf_write_end,
