@@ -101,7 +101,6 @@ sf_file_read(struct kiocb *iocb, struct iov_iter *iov)
    int err;
    struct dentry *dentry;
 
-   printk("sf_file_read: karino 2-1\n");
    dentry = iocb->ki_filp->f_path.dentry;
    err = sf_inode_revalidate(dentry);
    if (err)
@@ -127,7 +126,6 @@ sf_file_write(struct kiocb *iocb, struct iov_iter *iov)
    struct dentry *dentry = file->f_path.dentry;
    struct inode *inode = dentry->d_inode;
 
-   printk("sf_file_write: karino 2-1\n");
    err = sf_inode_revalidate(dentry);
    if (err)
        return err;
@@ -145,7 +143,6 @@ sf_file_write(struct kiocb *iocb, struct iov_iter *iov)
 static int
 sf_file_flush(struct file *file, fl_owner_t id)
 {
-    printk("sf_file_flush: karino 2-1\n");
     return 0;
     //if ((file->f_mode & FMODE_WRITE) == 0)
     //    return 0;    
@@ -336,7 +333,6 @@ sf_file_llseek(struct file *file, loff_t offset, int origin)
    int err;
    struct dentry *dentry;
 
-   printk("sf_file_llseek: karino 2-1\n");
    dentry = file->f_path.dentry;
    err = sf_inode_revalidate(dentry);
    if (err)
@@ -351,7 +347,6 @@ sf_file_splice_read(struct file *file, loff_t *offset, struct pipe_inode_info *p
    int err;
    struct dentry *dentry;
 
-   printk("sf_file_splice_read: karino 2-1\n");
    dentry = file->f_path.dentry;
    err = sf_inode_revalidate(dentry);
    if (err)
@@ -533,18 +528,15 @@ static int sf_reg_open(struct inode *inode, struct file *file)
  */
 static int sf_reg_release(struct inode *inode, struct file *file)
 {
-    printk("sf_reg_release: karino 1\n");
     int rc;
     struct sf_reg_info *sf_r;
     struct sf_glob_info *sf_g;
     struct sf_inode_info *sf_i = GET_INODE_INFO(inode);
 
-    printk("sf_reg_release: karino 2\n");
     TRACE();
     sf_g = GET_GLOB_INFO(inode->i_sb);
     sf_r = file->private_data;
 
-    printk("sf_reg_release: karino 3\n");
     BUG_ON(!sf_g);
     BUG_ON(!sf_r);
 
@@ -555,18 +547,14 @@ static int sf_reg_release(struct inode *inode, struct file *file)
      * defined before 2.6.6 and not exported until quite a bit later. */
     /* filemap_write_and_wait(inode->i_mapping); */
 
-    printk("sf_reg_release: karino 4\n");
     if (   inode->i_mapping->nrpages
         && filemap_fdatawrite(inode->i_mapping) != -EIO)
         filemap_fdatawait(inode->i_mapping);
 #endif
-    printk("sf_reg_release: karino 5\n");
     rc = vboxCallClose(&client_handle, &sf_g->map, sf_r->handle);
-    printk("sf_reg_release: karino 6\n");
     if (RT_FAILURE(rc))
         LogFunc(("vboxCallClose failed rc=%Rrc\n", rc));
 
-    printk("sf_reg_release: karino 7\n");
     kfree(sf_r);
 
     //sf_i->file = NULL;
@@ -574,7 +562,6 @@ static int sf_reg_release(struct inode *inode, struct file *file)
 
     sf_i->handle = SHFL_HANDLE_NIL;
     file->private_data = NULL;
-    printk("sf_reg_release: karino 8\n");
     return 0;
 }
 
@@ -690,7 +677,6 @@ static int sf_reg_mmap(struct file *file, struct vm_area_struct *vma)
 
     vma->vm_ops = &sf_vma_ops;
 
-    printk("sf_reg_mmap: karino 2-1\n");
     dentry = file->f_path.dentry;
     err = sf_inode_revalidate(dentry);
     if (err)
@@ -855,7 +841,6 @@ sf_gethandle(struct sf_inode_info *sf_i)
 
         // write可能なやつは一つだけという前提
         if (sf_r_tmp->CreateFlags & SHFL_CF_ACCESS_WRITE) {
-            printk("     sf_gethandle: sf_r_tmp=%p\n", sf_r_tmp);
             return sf_r_tmp;
         }
     }
@@ -866,16 +851,11 @@ sf_gethandle(struct sf_inode_info *sf_i)
 static int
 sf_writepage(struct page *page, struct writeback_control *wbc)
 {
-    printk("sf_writepage: karino 0 \n");
     struct address_space *mapping = page->mapping;
-    printk("sf_writepage: karino 0-1 mapping=%p \n", mapping);
     struct inode *inode = mapping->host;
-    printk("sf_writepage: karino 0-2 inode=%p, i_ino=%d\n", inode, (int)inode->i_ino );
 
     struct sf_glob_info *sf_g = GET_GLOB_INFO(inode->i_sb);
-    printk("sf_writepage: karino 0-3 sf_g=%p \n", sf_g);
     struct sf_inode_info *sf_i = GET_INODE_INFO(inode);
-    printk("sf_writepage: karino 0-4 sf_i=%p  \n", sf_i);
 
     //
     /* struct file *file = sf_i->file; */
@@ -901,7 +881,6 @@ sf_writepage(struct page *page, struct writeback_control *wbc)
     //    }
     //}
 
-    printk("sf_writepage: karino 0-6 \n");
     char *buf;
     uint32_t nwritten = PAGE_SIZE;
     int end_index = inode->i_size >> PAGE_SHIFT;
@@ -942,13 +921,10 @@ out:
 static int
 sf_writepages(struct address_space *mapping, struct writeback_control *wbc)
 {
-    printk("sf_writepages: karino 0\n");
     struct inode *inode = mapping->host;
     struct sf_glob_info *sf_g = GET_GLOB_INFO(inode->i_sb);
     struct sf_inode_info *sf_i = GET_INODE_INFO(inode);
-    printk("sf_writepages: karino 0-2 sf_g=%p, sf_i=%p\n", sf_g,  sf_i);
 
-    printk("sf_writepages: karino 0-1 inode=%p, i_ino=%d\n", inode, (int)inode->i_ino );
     struct pagevec pvec;
 
     pgoff_t index, end;
@@ -963,19 +939,14 @@ sf_writepages(struct address_space *mapping, struct writeback_control *wbc)
     size_t tmp_size;
     uint32_t to_write = 0;
     loff_t off;
-    printk("sf_writepages: karino 1\n");
     int end_index = inode->i_size >> PAGE_SHIFT;
 
 
     // 書き込み可能なhandlを取得
     struct sf_reg_info *sf_r = sf_gethandle(sf_i);
-    printk("sf_writepages: sf_r=%p\n", sf_r);
     if (!sf_r)
         return -ENOMEM;
-    printk("sf_writepages: karino 0-2 sf_g=%p, sf_r=%p\n", sf_g,  sf_r);
-    printk("sf_writepages: karino 0-2 sf_g->map=%p, sf_r->handle=%p\n", &sf_g->map,  &sf_r->handle);
 
-    printk("sf_writepages: karino 2\n");
 
     // TODO: tmp領域を確保する.
     bufsize = PAGE_SIZE *  wbc->nr_to_write;
@@ -989,26 +960,21 @@ sf_writepages(struct address_space *mapping, struct writeback_control *wbc)
     physbuf = alloc_bounce_buffer(&tmp_size, &tmp_phys, bufsize, __PRETTY_FUNCTION__);
     if (!physbuf)
         return -ENOMEM;
-    printk("sf_writepages: karino 3: tmp_size=%d\n", tmp_size);
 
     // dirty pageを取得する
     index = wbc->range_start >> PAGE_CACHE_SHIFT;
     end = wbc->range_end >> PAGE_CACHE_SHIFT;
 
-    printk("sf_writepages: karino 4\n");
     pagevec_init(&pvec, 0);
     nr_pages = pagevec_lookup_tag(&pvec, mapping, &index, PAGECACHE_TAG_DIRTY,
               min(end - index, (pgoff_t)PAGEVEC_SIZE-1) + 1);
 
-    printk("sf_writepages: karino 5\n");
     if (nr_pages == 0)
         return -ENOMEM;
 
     // writeする.
     for (i = 0; i < nr_pages; i++) {
-        printk("    karino 1\n");
         struct page *page = pvec.pages[i];
-        printk("    karino 2: to_write=%d, buf_startindex=%d page->index=%d \n", (int)to_write, (int)buf_startindex, (int)page->index);
 
         if (to_write != 0){
             // pageが連続していない or tmpサイズを超えてしまう.
@@ -1031,14 +997,12 @@ sf_writepages(struct address_space *mapping, struct writeback_control *wbc)
 
         lock_page(page);
 
-        printk("    karino 3\n");
         if (!PageDirty(page)) {
             /* someone wrote it for us */
             unlock_page(page);
             continue;
         }
 
-        printk("    karino 4\n");
         if (PageWriteback(page)) {
             if (wbc->sync_mode != WB_SYNC_NONE){
                 wait_on_page_writeback(page);
@@ -1047,38 +1011,31 @@ sf_writepages(struct address_space *mapping, struct writeback_control *wbc)
                 continue;
             }
         }
-        printk("    karino 5\n");
 
         if (--wbc->nr_to_write <= 0 &&
             wbc->sync_mode == WB_SYNC_NONE) {
         	break;
         }
-        printk("    karino 6\n");
 
         // コピーする.
         copy_page(physbuf + ((page->index - buf_startindex) << PAGE_SHIFT),
                    page_address(page));
-        printk("    karino 7: page->index=%d, end_index=%d\n", (int)page->index, (int)end_index);
 	if (page->index >= end_index)
             to_write += inode->i_size & (PAGE_SIZE-1);
         else
             to_write += PAGE_SIZE;
-        printk("    karino 8\n");
 
         unlock_page(page);
     }
 
-    printk("sf_writepages: karino 6: \n");
     // 最後のtmpを書き込む.
     off = ((loff_t) buf_startindex) << PAGE_SHIFT;
-    printk("sf_writepages: karino 7: to_write=%d, off=%d \n", (int)to_write, (int)off);
 
     err = sf_reg_write_aux(__func__, sf_g, sf_r, physbuf, &to_write, off);
     if (err < 0)
     {
         return err;
     }
-    printk("sf_writepages: karino 8\n");
 
     pagevec_release(&pvec);
 
@@ -1175,7 +1132,6 @@ start:
 int sf_write_end(struct file *file, struct address_space *mapping, loff_t pos,
                  unsigned len, unsigned copied, struct page *page, void *fsdata)
 {
-    printk("sf_write_end: karino 0 \n");
     struct inode *inode = mapping->host;
     struct sf_glob_info *sf_g = GET_GLOB_INFO(inode->i_sb);
     struct sf_reg_info *sf_r = file->private_data;
@@ -1185,7 +1141,6 @@ int sf_write_end(struct file *file, struct address_space *mapping, loff_t pos,
     uint32_t nwritten = len;
     struct timespec ct = CURRENT_TIME;
     int err;
-    printk("sf_write_end: karino 0-2 inode=%p, i_ino=%d\n", inode, (int)inode->i_ino );
 
     TRACE();
 

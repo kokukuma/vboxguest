@@ -216,7 +216,6 @@ int sf_stat(const char *caller, struct sf_glob_info *sf_g,
    update inode attributes */
 int sf_inode_revalidate(struct dentry *dentry)
 {
-    printk("sf_inode_revalidate: karino 0 \n");
     int err;
     struct sf_glob_info *sf_g;
     struct sf_inode_info *sf_i;
@@ -230,7 +229,6 @@ int sf_inode_revalidate(struct dentry *dentry)
         LogFunc(("no dentry(%p) or inode(%p)\n", dentry, dentry->d_inode));
         return -EINVAL;
     }
-    printk("sf_inode_revalidate: karino 0-2 inode=%p, i_ino=%d\n", dentry->d_inode, (int)dentry->d_inode->i_ino );
 
     sf_g = GET_GLOB_INFO(dentry->d_inode->i_sb);
     sf_i = GET_INODE_INFO(dentry->d_inode);
@@ -262,16 +260,16 @@ int sf_inode_revalidate(struct dentry *dentry)
 
     // ゲストの方が更新時刻が新しいなら、ゲストの更新はしない.
     // size/更新日時がゲスト・ホストで同じなら、page cacheの開放はしない.
-    printk("guest_time=%d, i_mtime=%d \n", (int)guest_time.tv_sec, (int)host_time.tv_sec);
     if ( guest_time.tv_sec > host_time.tv_sec ){
-        printk("new guest\n");
+        //printk("sf_inode_revalidate: inode=%p, i_ino=%d\n", dentry->d_inode, (int)dentry->d_inode->i_ino );
+        //printk("new guest\n");
 	return 0;
     } else if ( info.cbObject != dentry->d_inode->i_size ||
               guest_time.tv_sec < host_time.tv_sec){
-        printk("page reset\n");
+        //printk("sf_inode_revalidate: inode=%p, i_ino=%d\n", dentry->d_inode, (int)dentry->d_inode->i_ino );
+        //printk("page reset\n");
         invalidate_inode_pages2(dentry->d_inode->i_mapping);
     }
-    printk("inode reset\n");
 
     sf_init_inode(sf_g, dentry->d_inode, &info);
     sf_i->force_restat = 0;
@@ -317,7 +315,6 @@ int sf_getattr(struct vfsmount *mnt, struct dentry *dentry, struct kstat *kstat)
 {
     int err;
 
-    printk("sf_getattr: karino 2-1\n");
     TRACE();
     err = sf_inode_revalidate(dentry);
     if (err)
@@ -329,7 +326,6 @@ int sf_getattr(struct vfsmount *mnt, struct dentry *dentry, struct kstat *kstat)
 
 int sf_setattr(struct dentry *dentry, struct iattr *iattr)
 {
-    printk("sf_setattr: karino 2-1\n");
     struct sf_glob_info *sf_g;
     struct sf_inode_info *sf_i;
     SHFLCREATEPARMS params;
@@ -434,7 +430,6 @@ int sf_setattr(struct dentry *dentry, struct iattr *iattr)
     }
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 4, 25)
-    printk("   writeback 1 \n");
     if (   inode->i_mapping->nrpages
         && filemap_fdatawrite(inode->i_mapping) != -EIO)
         filemap_fdatawait(inode->i_mapping);

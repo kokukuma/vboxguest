@@ -366,6 +366,8 @@ static struct dentry *sf_lookup(struct inode *parent, struct dentry *dentry
 #endif
                                )
 {
+
+    //printk("sf_lookup\n");
     int err;
     struct sf_inode_info *sf_i, *sf_new_i;
     struct sf_glob_info *sf_g;
@@ -755,7 +757,6 @@ static int sf_rmdir(struct inode *parent, struct dentry *dentry)
 static int sf_rename(struct inode *old_parent, struct dentry *old_dentry,
                      struct inode *new_parent, struct dentry *new_dentry)
 {
-    printk("sf_rename: 0\n");
     int err = 0, rc = VINF_SUCCESS;
     struct sf_glob_info *sf_g = GET_GLOB_INFO(old_parent->i_sb);
 
@@ -773,14 +774,10 @@ static int sf_rename(struct inode *old_parent, struct dentry *old_dentry,
 
         //
         struct inode *old_inode = old_dentry->d_inode;
-        printk("sf_rename: 1\n");
 	if (   old_inode->i_mapping->nrpages
 		&& filemap_fdatawrite(old_inode->i_mapping) != -EIO){
-        	printk("sf_rename: 2, filemap_fdatawait\n");
 		filemap_fdatawait(old_inode->i_mapping);
-        	printk("sf_rename: 3, filemap_fdatawait\n");
 	}
-	printk("sf_rename: 4\n");
 
         /* As we save the relative path inside the inode structure, we need to change
            this if the rename is successful. */
