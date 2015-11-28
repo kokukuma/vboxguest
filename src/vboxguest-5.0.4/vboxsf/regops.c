@@ -940,6 +940,8 @@ sf_writepages(struct address_space *mapping, struct writeback_control *wbc)
     uint32_t to_write = 0;
     loff_t off;
     int end_index = inode->i_size >> PAGE_SHIFT;
+    int tag;
+    int done = 0;
 
 
 
@@ -966,89 +968,127 @@ sf_writepages(struct address_space *mapping, struct writeback_control *wbc)
     index = wbc->range_start >> PAGE_CACHE_SHIFT;
     end = wbc->range_end >> PAGE_CACHE_SHIFT;
 
+
+    if (wbc->sync_mode == WB_SYNC_ALL || wbc->tagged_writepages)
+        tag = PAGECACHE_TAG_TOWRITE;
+    else
+	tag = PAGECACHE_TAG_DIRTY;
+
+    if (wbc->sync_mode == WB_SYNC_ALL || wbc->tagged_writepages)
+        tag_pages_for_writeback(mapping, index, end);
+
     pagevec_init(&pvec, 0);
-    nr_pages = pagevec_lookup_tag(&pvec, mapping, &index, PAGECACHE_TAG_DIRTY,
-              min(end - index, (pgoff_t)PAGEVEC_SIZE-1) + 1);
 
-    if (nr_pages == 0){
-        ret = -ENOMEM;
-        goto out;
-    }
 
-    // writeする.
-    for (i = 0; i < nr_pages; i++) {
-        struct page *page = pvec.pages[i];
+    while (!done && (index <= end)) {
+   
+        nr_pages = pagevec_lookup_tag(&pvec, mapping, &index, tag,
+                  min(end - index, (pgoff_t)PAGEVEC_SIZE-1) + 1);
 
-        if (to_write != 0){
-            // pageが連続していない or tmpサイズを超えてしまう.
-            if ( buf_startindex + 1 != page->index || to_write + PAGE_SIZE > tmp_size){
-               // tmpに溜め込んだ分をwrite
-                off = (loff_t) buf_startindex << PAGE_SHIFT;
-                err = sf_reg_write_aux(__func__, sf_g, sf_r, physbuf, &to_write, off);
-                if (err < 0)
-                {
-                    ret = err;
-                    goto out;
-                }
+        //printk("sf_writepages %d\n", nr_pages);
 
-                // stratを今のindexに.
-                buf_startindex = page->index;
-                to_write = 0;
+        if (nr_pages == 0){
+            ret = -ENOMEM;
+            goto out;
+        }
+
+        // writeする.
+        for (i = 0; i < nr_pages; i++) {
+            struct page *page = pvec.pages[i];
+
+            if (page->index > end) {
+                done = 1;
+                break;
             }
-        }else{
-            buf_startindex = page->index;
-        }
 
-        lock_page(page);
+            if (to_write != 0){
+                // pageが連続していない or tmpサイズを超えてしまう.
+                if ( buf_startindex + 1 != page->index || to_write + PAGE_SIZE > tmp_size){
+                   // tmpに溜め込んだ分をwrite
+                    off = (loff_t) buf_startindex << PAGE_SHIFT;
+                    err = sf_reg_write_aux(__func__, sf_g, sf_r, physbuf, &to_write, off);
+                    if (err < 0)
+                    {
+                        ret = err;
+                        goto out;
+                    }
+                    if (off > inode->i_size)
+                       inode->i_size = off;
 
-        if (!PageDirty(page)) {
-            /* someone wrote it for us */
-            unlock_page(page);
-            continue;
-        }
-
-        if (PageWriteback(page)) {
-            if (wbc->sync_mode != WB_SYNC_NONE){
-                wait_on_page_writeback(page);
+                    // stratを今のindexに.
+                    buf_startindex = page->index;
+                    to_write = 0;
+                }
             }else{
+                buf_startindex = page->index;
+            }
+
+            lock_page(page);
+
+            if (unlikely(page->mapping != mapping)) { 
                 unlock_page(page);
                 continue;
             }
-        }
-        if (!clear_page_dirty_for_io(page)){
+
+            if (!PageDirty(page)) {
+                /* someone wrote it for us */
+                unlock_page(page);
+                continue;
+            }
+
+            if (PageWriteback(page)) {
+                if (wbc->sync_mode != WB_SYNC_NONE){
+                    wait_on_page_writeback(page);
+                }else{
+                    unlock_page(page);
+                    continue;
+                }
+            }
+            if (!clear_page_dirty_for_io(page)){
+                unlock_page(page);
+                continue;
+            }  
+
+            // コピーする.
+            buf = kmap(page);  
+            //copy_page(physbuf + ((page->index - buf_startindex) << PAGE_SHIFT),
+            //           page_address(page));
+            copy_page(physbuf + ((page->index - buf_startindex) << PAGE_SHIFT), buf);
+            kunmap(page);
+
+            if (page->index >= end_index)
+                to_write += inode->i_size & (PAGE_SIZE-1);
+            else
+                to_write += PAGE_SIZE;
+
             unlock_page(page);
-            continue;
-        }  
 
-        if (--wbc->nr_to_write <= 0 &&
-            wbc->sync_mode == WB_SYNC_NONE) {
-        	break;
+            if (--wbc->nr_to_write <= 0 &&
+                wbc->sync_mode == WB_SYNC_NONE) {
+                done = 1; 
+            	break;
+            }
+
         }
 
-        // コピーする.
-        copy_page(physbuf + ((page->index - buf_startindex) << PAGE_SHIFT),
-                   page_address(page));
-	if (page->index >= end_index)
-            to_write += inode->i_size & (PAGE_SIZE-1);
-        else
-            to_write += PAGE_SIZE;
-
-        unlock_page(page);
-    }
-
-    // 最後のtmpを書き込む.
-    off = ((loff_t) buf_startindex) << PAGE_SHIFT;
-
-    err = sf_reg_write_aux(__func__, sf_g, sf_r, physbuf, &to_write, off);
-    if (err < 0)
-    {
-        ret = err;
-        goto out;
+        // 最後のtmpを書き込む.
+        off = ((loff_t) buf_startindex) << PAGE_SHIFT;
+        err = sf_reg_write_aux(__func__, sf_g, sf_r, physbuf, &to_write, off);
+        if (err < 0)
+        {
+            ret = err;
+            goto out;
+        }
+        if (off > inode->i_size)
+            inode->i_size = off;
     }
 
 out:
     pagevec_release(&pvec);
-    mapping_set_error(mapping, ret);
+    cond_resched();
+
+    free_bounce_buffer(physbuf); 
+    //mapping_set_error(mapping, ret);
     return ret;
 
     //// サイズ更新は、write_endの段階で終了しているはず.
