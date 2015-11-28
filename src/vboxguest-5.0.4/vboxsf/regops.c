@@ -932,7 +932,7 @@ sf_writepages(struct address_space *mapping, struct writeback_control *wbc)
 
     RTCCPHYS tmp_phys;
 
-    int nr_pages, err, i;
+    int nr_pages, err, i, ret = 0;
     int bufsize;
 
     void *physbuf;
@@ -940,6 +940,7 @@ sf_writepages(struct address_space *mapping, struct writeback_control *wbc)
     uint32_t to_write = 0;
     loff_t off;
     int end_index = inode->i_size >> PAGE_SHIFT;
+
 
 
     // 書き込み可能なhandlを取得
@@ -969,8 +970,10 @@ sf_writepages(struct address_space *mapping, struct writeback_control *wbc)
     nr_pages = pagevec_lookup_tag(&pvec, mapping, &index, PAGECACHE_TAG_DIRTY,
               min(end - index, (pgoff_t)PAGEVEC_SIZE-1) + 1);
 
-    if (nr_pages == 0)
-        return -ENOMEM;
+    if (nr_pages == 0){
+        ret = -ENOMEM;
+        goto out;
+    }
 
     // writeする.
     for (i = 0; i < nr_pages; i++) {
@@ -984,7 +987,8 @@ sf_writepages(struct address_space *mapping, struct writeback_control *wbc)
                 err = sf_reg_write_aux(__func__, sf_g, sf_r, physbuf, &to_write, off);
                 if (err < 0)
                 {
-    		    return err;
+                    ret = err;
+                    goto out;
                 }
 
                 // stratを今のindexに.
@@ -1011,6 +1015,10 @@ sf_writepages(struct address_space *mapping, struct writeback_control *wbc)
                 continue;
             }
         }
+        if (!clear_page_dirty_for_io(page)){
+            unlock_page(page);
+            continue;
+        }  
 
         if (--wbc->nr_to_write <= 0 &&
             wbc->sync_mode == WB_SYNC_NONE) {
@@ -1034,10 +1042,14 @@ sf_writepages(struct address_space *mapping, struct writeback_control *wbc)
     err = sf_reg_write_aux(__func__, sf_g, sf_r, physbuf, &to_write, off);
     if (err < 0)
     {
-        return err;
+        ret = err;
+        goto out;
     }
 
+out:
     pagevec_release(&pvec);
+    mapping_set_error(mapping, ret);
+    return ret;
 
     //// サイズ更新は、write_endの段階で終了しているはず.
     //if (off > inode->i_size)
@@ -1192,7 +1204,7 @@ struct address_space_operations sf_reg_aops =
     .readpage      = sf_readpage,
     .readpages     = sf_readpages,
     .writepage     = sf_writepage,
-    .writepages     = sf_writepages,
+    .writepages    = sf_writepages,
 # if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 24)
     .write_begin   = sf_write_begin,
     .write_end     = sf_write_end,

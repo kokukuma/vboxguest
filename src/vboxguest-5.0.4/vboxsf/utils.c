@@ -299,7 +299,7 @@ sf_dentry_revalidate(struct dentry *dentry, int flags)
         return -ECHILD;
 #endif
 
-    printk("sf_dentry_revalidate: karino 2-1\n");
+    //printk("sf_dentry_revalidate: karino 2-1\n");
     if (sf_inode_revalidate(dentry))
         return 0;
 
