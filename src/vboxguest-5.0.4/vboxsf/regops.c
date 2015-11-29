@@ -925,8 +925,8 @@ out:
 //        // pageが連続していない or tmpサイズを超えてしまう.
 //        if ( &buf_startindex + 1 != page->index || &to_write + PAGE_SIZE > tmp_size){
 //           // tmpに溜め込んだ分をwrite
-//            off = (loff_t) buf_startindex << PAGE_SHIFT;
-//            err = sf_reg_write_aux(__func__, sf_g, sf_r, physbuf, &to_write, off);
+//            off = (loff_t) &buf_startindex << PAGE_SHIFT;
+//            err = sf_reg_write_aux(__func__, sf_g, sf_r, physbuf, to_write, off);
 //            if (err < 0)
 //            {
 //                ret = err;
@@ -936,10 +936,16 @@ out:
 //               inode->i_size = off;
 //    
 //            // stratを今のindexに.
-//            buf_startindex = page->index;
-//            to_write = 0;
+//            &buf_startindex = page->index;
+//            &to_write = 0;
 //        }
 //    }
+//    copy_page(physbuf + ((page->index - buf_startindex) << PAGE_SHIFT),
+//           page_address(page));
+//    if (page->index >= end_index)
+//        to_write += inode->i_size & (PAGE_SIZE-1);
+//    else
+//        to_write += PAGE_SIZE;
 //}
 static int
 sf_writepages(struct address_space *mapping, struct writeback_control *wbc)
@@ -990,25 +996,26 @@ sf_writepages(struct address_space *mapping, struct writeback_control *wbc)
 
 
 	pagevec_init(&pvec, 0);
-	if (wbc->range_cyclic) {
-		writeback_index = mapping->writeback_index; /* prev offset */
-		index = writeback_index;
-		if (index == 0)
-			cycled = 1;
-		else
-			cycled = 0;
-		end = -1;
-	} else {
+	//if (wbc->range_cyclic) {
+	//	writeback_index = mapping->writeback_index; /* prev offset */
+	//	index = writeback_index;
+	//	if (index == 0)
+	//		cycled = 1;
+	//	else
+	//		cycled = 0;
+	//	end = -1;
+	//} else {
 		index = wbc->range_start >> PAGE_CACHE_SHIFT;
 		end = wbc->range_end >> PAGE_CACHE_SHIFT;
 		if (wbc->range_start == 0 && wbc->range_end == LLONG_MAX)
 			range_whole = 1;
 		cycled = 1; /* ignore range_cyclic tests */
-	}
-	if (wbc->sync_mode == WB_SYNC_ALL || wbc->tagged_writepages)
+	//}
+	if (wbc->sync_mode == WB_SYNC_ALL || wbc->tagged_writepages){
 		tag = PAGECACHE_TAG_TOWRITE;
-	else
+	}else{
 		tag = PAGECACHE_TAG_DIRTY;
+        }
 retry:
 	if (wbc->sync_mode == WB_SYNC_ALL || wbc->tagged_writepages)
 		tag_pages_for_writeback(mapping, index, end);
@@ -1019,6 +1026,7 @@ retry:
 
 		nr_pages = pagevec_lookup_tag(&pvec, mapping, &index, tag,
 			      min(end - index, (pgoff_t)PAGEVEC_SIZE-1) + 1);
+
 		if (nr_pages == 0)
 			break;
 
@@ -1094,8 +1102,6 @@ continue_unlock:
             		            ret = err;
                                     break;
             		        }
-            		        //if (off > inode->i_size)
-            		        //   inode->i_size = off;
 
             		        // stratを今のindexに.
             		        buf_startindex = page->index;
@@ -1159,27 +1165,25 @@ continue_unlock:
 		err = sf_reg_write_aux(__func__, sf_g, sf_r, physbuf, &to_write, off);
 		if (err < 0)
 		    ret = err;
-		//if (off > inode->i_size)
-		//    inode->i_size = off;
 		//--------------------------------------
 
 
 		pagevec_release(&pvec);
 		cond_resched();
 	}
-	if (!cycled && !done) {
-		/*
-		 * range_cyclic:
-		 * We hit the last page and there is more work to be done: wrap
-		 * back to the start of the file
-		 */
-		cycled = 1;
-		index = 0;
-		end = writeback_index - 1;
-		goto retry;
-	}
-	if (wbc->range_cyclic || (range_whole && wbc->nr_to_write > 0))
-		mapping->writeback_index = done_index;
+	//if (!cycled && !done) {
+	//	/*
+	//	 * range_cyclic:
+	//	 * We hit the last page and there is more work to be done: wrap
+	//	 * back to the start of the file
+	//	 */
+	//	cycled = 1;
+	//	index = 0;
+	//	end = writeback_index - 1;
+	//	goto retry;
+	//}
+	//if (wbc->range_cyclic || (range_whole && wbc->nr_to_write > 0))
+	//	mapping->writeback_index = done_index;
 
 	return ret;
 }
@@ -1256,7 +1260,6 @@ sf_writepages2(struct address_space *mapping, struct writeback_control *wbc)
         nr_pages = pagevec_lookup_tag(&pvec, mapping, &index, tag,
                   min(end - index, (pgoff_t)PAGEVEC_SIZE-1) + 1);
 
-        printk("sf_writepages %d\n", nr_pages);
         int cnt = 0;
 
         if (nr_pages == 0){
@@ -1344,7 +1347,6 @@ sf_writepages2(struct address_space *mapping, struct writeback_control *wbc)
             	break;
             }
         }
-        printk("clear_page_dirty_for_io count=%d\n", cnt);
 
         // 最後のtmpを書き込む.
         off = ((loff_t) buf_startindex) << PAGE_SHIFT;
