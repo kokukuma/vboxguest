@@ -1185,6 +1185,7 @@ continue_unlock:
 	//if (wbc->range_cyclic || (range_whole && wbc->nr_to_write > 0))
 	//	mapping->writeback_index = done_index;
 
+    free_bounce_buffer(physbuf);
 	return ret;
 }
 
@@ -1469,7 +1470,7 @@ int sf_write_end(struct file *file, struct address_space *mapping, loff_t pos,
     unsigned to = from + len;
     uint32_t nwritten = len;
     struct timespec ct = CURRENT_TIME;
-    int err;
+    int err = 0;
 
     TRACE();
 
@@ -1493,20 +1494,21 @@ int sf_write_end(struct file *file, struct address_space *mapping, loff_t pos,
     }
 
     // set dirty
-    __set_page_dirty_nobuffers(page);
-
+    if (!PageUptodate(page)){
+        buf = kmap(page);
+        err = sf_reg_write_aux(__func__, sf_g, sf_r, buf+from, &nwritten, pos);
+        kunmap(page);
+    }else{
+        __set_page_dirty_nobuffers(page);
+    }
     /* if (!PageUptodate(page) && err == PAGE_SIZE) */
     /*     SetPageUptodate(page); */
 
-    //if (err >= 0) {
-    //    pos += nwritten;
-    //    if (pos > inode->i_size)
-    //        inode->i_size = pos;
-    //}
-    // ファイルサイズと更新日時の更新
-    pos += nwritten;
-    if (pos > inode->i_size)
-        inode->i_size = pos;
+    if (err >= 0) {
+        pos += nwritten;
+        if (pos > inode->i_size)
+            inode->i_size = pos;
+    }
 
     unlock_page(page);
     page_cache_release(page);
