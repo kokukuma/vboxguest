@@ -337,6 +337,7 @@ static int sf_read_super_aux(struct super_block *sb, void *data, int flags)
     }
 
     sb->s_root = droot;
+    sb->s_bdi = &sf_g->bdi;
     SET_GLOB_INFO(sb, sf_g);
     return 0;
 
