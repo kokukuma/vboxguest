@@ -1161,10 +1161,12 @@ continue_unlock:
 
 		//--------------------------------------
 		// 最後のtmpを書き込む.
-		off = ((loff_t) buf_startindex) << PAGE_SHIFT;
-		err = sf_reg_write_aux(__func__, sf_g, sf_r, physbuf, &to_write, off);
-		if (err < 0)
-		    ret = err;
+		if (to_write != 0){
+		    off = ((loff_t) buf_startindex) << PAGE_SHIFT;
+		    err = sf_reg_write_aux(__func__, sf_g, sf_r, physbuf, &to_write, off);
+		    if (err < 0)
+		        ret = err;
+		}
 		//--------------------------------------
 
 
