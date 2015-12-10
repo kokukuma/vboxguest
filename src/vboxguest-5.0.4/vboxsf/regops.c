@@ -143,11 +143,9 @@ sf_file_write(struct kiocb *iocb, struct iov_iter *iov)
 static int
 sf_file_flush(struct file *file, fl_owner_t id)
 {
-    return 0;
-    //if ((file->f_mode & FMODE_WRITE) == 0)
-    //    return 0;    
-    //printk("sf_file_flush: karino 2-2\n");
-    //return vfs_fsync(file, 0);
+    if ((file->f_mode & FMODE_WRITE) == 0)
+        return 0;    
+    return vfs_fsync(file, 0);
 }
 
 #else /* KERNEL_VERSION >= 3.16.0 */
@@ -547,9 +545,9 @@ static int sf_reg_release(struct inode *inode, struct file *file)
      * defined before 2.6.6 and not exported until quite a bit later. */
     /* filemap_write_and_wait(inode->i_mapping); */
 
-    if (   inode->i_mapping->nrpages
-        && filemap_fdatawrite(inode->i_mapping) != -EIO)
-        filemap_fdatawait(inode->i_mapping);
+    //if (   inode->i_mapping->nrpages
+    //    && filemap_fdatawrite(inode->i_mapping) != -EIO)
+    //    filemap_fdatawait(inode->i_mapping);
 #endif
     rc = vboxCallClose(&client_handle, &sf_g->map, sf_r->handle);
     if (RT_FAILURE(rc))
@@ -684,7 +682,7 @@ static int sf_reg_mmap(struct file *file, struct vm_area_struct *vma)
     return  generic_file_mmap(file, vma);
 }
 
-//    .fsync       = sf_file_fsync,
+    //.fsync       = noop_fsync,
 struct file_operations sf_reg_fops =
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 16, 0)
@@ -709,7 +707,7 @@ struct file_operations sf_reg_fops =
     .sendfile    = generic_file_sendfile,
 # endif
 # if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 35)
-    .fsync       = noop_fsync,
+    .fsync       = sf_file_fsync,
 # else
     .fsync       = simple_sync_file,
 # endif
@@ -838,8 +836,6 @@ sf_gethandle(struct sf_inode_info *sf_i)
     struct list_head *cur;
     list_for_each(cur, &sf_i->regs) {
         struct sf_reg_info *sf_r_tmp = list_entry(cur, struct sf_reg_info, head);
-        printk("         sf_r_tmp=%p, CreateFlags=%d\n", sf_r_tmp, (int)sf_r_tmp->CreateFlags );
-
         // write可能なやつは一つだけという前提
         if (sf_r_tmp->CreateFlags & SHFL_CF_ACCESS_WRITE) {
             return sf_r_tmp;
@@ -951,7 +947,6 @@ out:
 static int
 sf_writepages(struct address_space *mapping, struct writeback_control *wbc)
 {
-    printk("sf_writepages: 1\n");
     struct inode *inode = mapping->host;
         struct sf_glob_info *sf_g = GET_GLOB_INFO(inode->i_sb);
         struct sf_inode_info *sf_i = GET_INODE_INFO(inode);
@@ -979,7 +974,6 @@ sf_writepages(struct address_space *mapping, struct writeback_control *wbc)
 
         //--------------------------------------
         // 書き込み可能なhandlを取得
-        printk("sf_i=%p \n", sf_i);
         struct sf_reg_info *sf_r = sf_gethandle(sf_i);
         if (!sf_r)
             return -ENOMEM;
@@ -989,7 +983,6 @@ sf_writepages(struct address_space *mapping, struct writeback_control *wbc)
         if (bufsize > 32 * PAGE_SIZE)
             bufsize = 32 * PAGE_SIZE;
 
-        printk("bufsize=%d, PAGE_SIZE=%d, nr_to_write=%d\n", (int)bufsize, (int)PAGE_SIZE,  (int)wbc->nr_to_write);
 
         if (!bufsize)
             return 0;
@@ -997,7 +990,6 @@ sf_writepages(struct address_space *mapping, struct writeback_control *wbc)
         // tmp_phys: virt_to_phys
         physbuf = alloc_bounce_buffer(&tmp_size, &tmp_phys, bufsize, __PRETTY_FUNCTION__);
 
-        printk("bufsize=%d, PAGE_SIZE=%d, nr_to_write=%d, tmp_size=%d\n", (int)bufsize, (int)PAGE_SIZE,  (int)wbc->nr_to_write, (int)tmp_size);
         if (!physbuf)
             return -ENOMEM;
         //--------------------------------------
@@ -1038,7 +1030,6 @@ retry:
 		if (nr_pages == 0)
 			break;
 
-                printk("nr_pages=%d, index=%d, end=%d\n", (int)nr_pages, (int)index,  (int)end);
 		for (i = 0; i < nr_pages; i++) {
 			struct page *page = pvec.pages[i];
 
@@ -1100,7 +1091,6 @@ continue_unlock:
 			//ret = sf_writepage(page, wbc);
 
                         //--------------------------------------
-                        printk("to_write=%d, buf_startindex=%d, buf_previndex=%d, page->index=%d\n", (int)to_write, (int)buf_startindex, (int)buf_previndex, (int)page->index);
             		if (to_write != 0){
             		    // pageが連続していない or tmpサイズを超えてしまう.
             		    if ( buf_previndex + 1 != page->index || to_write + PAGE_SIZE > tmp_size){
