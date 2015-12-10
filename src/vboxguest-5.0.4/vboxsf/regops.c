@@ -838,6 +838,7 @@ sf_gethandle(struct sf_inode_info *sf_i)
     struct list_head *cur;
     list_for_each(cur, &sf_i->regs) {
         struct sf_reg_info *sf_r_tmp = list_entry(cur, struct sf_reg_info, head);
+        printk("         sf_r_tmp=%p, CreateFlags=%d\n", sf_r_tmp, (int)sf_r_tmp->CreateFlags );
 
         // write可能なやつは一つだけという前提
         if (sf_r_tmp->CreateFlags & SHFL_CF_ACCESS_WRITE) {
@@ -950,6 +951,7 @@ out:
 static int
 sf_writepages(struct address_space *mapping, struct writeback_control *wbc)
 {
+    printk("sf_writepages: 1\n");
     struct inode *inode = mapping->host;
         struct sf_glob_info *sf_g = GET_GLOB_INFO(inode->i_sb);
         struct sf_inode_info *sf_i = GET_INODE_INFO(inode);
@@ -963,6 +965,7 @@ sf_writepages(struct address_space *mapping, struct writeback_control *wbc)
 	pgoff_t end;		/* Inclusive */
 	pgoff_t done_index;
         pgoff_t buf_startindex = 0;
+        pgoff_t buf_previndex = 0;
 	int cycled;
 	int range_whole = 0;
 	int tag;
@@ -976,6 +979,7 @@ sf_writepages(struct address_space *mapping, struct writeback_control *wbc)
 
         //--------------------------------------
         // 書き込み可能なhandlを取得
+        printk("sf_i=%p \n", sf_i);
         struct sf_reg_info *sf_r = sf_gethandle(sf_i);
         if (!sf_r)
             return -ENOMEM;
@@ -985,11 +989,15 @@ sf_writepages(struct address_space *mapping, struct writeback_control *wbc)
         if (bufsize > 32 * PAGE_SIZE)
             bufsize = 32 * PAGE_SIZE;
 
+        printk("bufsize=%d, PAGE_SIZE=%d, nr_to_write=%d\n", (int)bufsize, (int)PAGE_SIZE,  (int)wbc->nr_to_write);
+
         if (!bufsize)
             return 0;
 
         // tmp_phys: virt_to_phys
         physbuf = alloc_bounce_buffer(&tmp_size, &tmp_phys, bufsize, __PRETTY_FUNCTION__);
+
+        printk("bufsize=%d, PAGE_SIZE=%d, nr_to_write=%d, tmp_size=%d\n", (int)bufsize, (int)PAGE_SIZE,  (int)wbc->nr_to_write, (int)tmp_size);
         if (!physbuf)
             return -ENOMEM;
         //--------------------------------------
@@ -1030,6 +1038,7 @@ retry:
 		if (nr_pages == 0)
 			break;
 
+                printk("nr_pages=%d, index=%d, end=%d\n", (int)nr_pages, (int)index,  (int)end);
 		for (i = 0; i < nr_pages; i++) {
 			struct page *page = pvec.pages[i];
 
@@ -1091,9 +1100,10 @@ continue_unlock:
 			//ret = sf_writepage(page, wbc);
 
                         //--------------------------------------
+                        printk("to_write=%d, buf_startindex=%d, buf_previndex=%d, page->index=%d\n", (int)to_write, (int)buf_startindex, (int)buf_previndex, (int)page->index);
             		if (to_write != 0){
             		    // pageが連続していない or tmpサイズを超えてしまう.
-            		    if ( buf_startindex + 1 != page->index || to_write + PAGE_SIZE > tmp_size){
+            		    if ( buf_previndex + 1 != page->index || to_write + PAGE_SIZE > tmp_size){
             		       // tmpに溜め込んだ分をwrite
             		        off = (loff_t) buf_startindex << PAGE_SHIFT;
             		        err = sf_reg_write_aux(__func__, sf_g, sf_r, physbuf, &to_write, off);
@@ -1118,6 +1128,8 @@ continue_unlock:
 		    	    to_write += inode->i_size & (PAGE_SIZE-1);
 		        else
 		    	    to_write += PAGE_SIZE;
+
+			buf_previndex = page->index;
 
                         loff_t tmp_off = ((loff_t) page->index) << PAGE_SHIFT;
 			if (tmp_off > inode->i_size)
