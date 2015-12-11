@@ -545,9 +545,9 @@ static int sf_reg_release(struct inode *inode, struct file *file)
      * defined before 2.6.6 and not exported until quite a bit later. */
     /* filemap_write_and_wait(inode->i_mapping); */
 
-    //if (   inode->i_mapping->nrpages
-    //    && filemap_fdatawrite(inode->i_mapping) != -EIO)
-    //    filemap_fdatawait(inode->i_mapping);
+    if (   inode->i_mapping->nrpages
+        && filemap_fdatawrite(inode->i_mapping) != -EIO)
+        filemap_fdatawait(inode->i_mapping);
 #endif
     rc = vboxCallClose(&client_handle, &sf_g->map, sf_r->handle);
     if (RT_FAILURE(rc))
@@ -683,6 +683,8 @@ static int sf_reg_mmap(struct file *file, struct vm_area_struct *vma)
 }
 
     //.fsync       = noop_fsync,
+    //.flush       = sf_file_flush,
+    //.fsync       = sf_file_fsync,
 struct file_operations sf_reg_fops =
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 16, 0)
@@ -697,7 +699,6 @@ struct file_operations sf_reg_fops =
     .aio_write   = generic_file_aio_write,
 #endif
     .open        = sf_reg_open,
-    .flush       = sf_file_flush,
     .release     = sf_reg_release,
     .mmap        = sf_reg_mmap,
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 0)
@@ -707,7 +708,7 @@ struct file_operations sf_reg_fops =
     .sendfile    = generic_file_sendfile,
 # endif
 # if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 35)
-    .fsync       = sf_file_fsync,
+    .fsync       = noop_fsync,
 # else
     .fsync       = simple_sync_file,
 # endif
