@@ -545,9 +545,11 @@ static int sf_reg_release(struct inode *inode, struct file *file)
      * defined before 2.6.6 and not exported until quite a bit later. */
     /* filemap_write_and_wait(inode->i_mapping); */
 
-    if (   inode->i_mapping->nrpages
-        && filemap_fdatawrite(inode->i_mapping) != -EIO)
-        filemap_fdatawait(inode->i_mapping);
+    //if (   inode->i_mapping->nrpages
+    //    && filemap_fdatawrite(inode->i_mapping) != -EIO)
+    //    filemap_fdatawait(inode->i_mapping);
+    if ( inode->i_mapping->nrpages )
+        filemap_fdatawrite(inode->i_mapping);
 #endif
     rc = vboxCallClose(&client_handle, &sf_g->map, sf_r->handle);
     if (RT_FAILURE(rc))
