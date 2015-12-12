@@ -29,8 +29,11 @@ static void *alloc_bounce_buffer(size_t *tmp_sizep, PRTCCPHYS physp, size_t
 
     /* try for big first. */
     tmp_size = RT_ALIGN_Z(xfer_size, PAGE_SIZE);
-    if (tmp_size > 16U*_1K)
-        tmp_size = 16U*_1K;
+    //if (tmp_size > 16U*_1K)
+    //    tmp_size = 16U*_1K;
+    if (tmp_size > 128U*_1K)
+        tmp_size = 128U*_1K;
+
     tmp = kmalloc(tmp_size, GFP_KERNEL);
     if (!tmp)
     {
