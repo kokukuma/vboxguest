@@ -1468,6 +1468,23 @@ start:
     return ret;
 }
 
+void update_file_size(struct page *page, unsigned to)
+{
+    struct inode *inode = page_file_mapping(page)->host; 
+    loff_t end, i_size;
+    pgoff_t end_index;
+
+    spin_lock(&inode->i_lock);
+
+    i_size = i_size_read(inode);
+    end_index = (i_size - 1) >> PAGE_CACHE_SHIFT;
+    if (i_size == 0 || page_file_index(page) >= end_index){
+        end = page_file_offset(page) + to;
+        if (i_size < end)
+            i_size_write(inode, end);
+    }
+    spin_unlock(&inode->i_lock);
+}
 
 int sf_write_end(struct file *file, struct address_space *mapping, loff_t pos,
                  unsigned len, unsigned copied, struct page *page, void *fsdata)
@@ -1481,6 +1498,7 @@ int sf_write_end(struct file *file, struct address_space *mapping, loff_t pos,
     uint32_t nwritten = len;
     struct timespec ct = CURRENT_TIME;
     int err = 0;
+
 
     TRACE();
 
@@ -1514,11 +1532,20 @@ int sf_write_end(struct file *file, struct address_space *mapping, loff_t pos,
     /* if (!PageUptodate(page) && err == PAGE_SIZE) */
     /*     SetPageUptodate(page); */
 
+    //if (err >= 0) {
+    //    spin_lock(&inode->i_lock);  
+    //    pos += copied;
+    //    if (pos > inode->i_size)
+    //        inode->i_size = pos;
+    //    spin_unlock(&inode->i_lock);  
+    //}
+
     if (err >= 0) {
-        pos += nwritten;
-        if (pos > inode->i_size)
-            inode->i_size = pos;
+        update_file_size(page, to);
     }
+
+
+
 
     unlock_page(page);
     page_cache_release(page);
