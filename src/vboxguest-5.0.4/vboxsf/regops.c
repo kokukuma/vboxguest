@@ -29,11 +29,8 @@ static void *alloc_bounce_buffer(size_t *tmp_sizep, PRTCCPHYS physp, size_t
 
     /* try for big first. */
     tmp_size = RT_ALIGN_Z(xfer_size, PAGE_SIZE);
-    //if (tmp_size > 16U*_1K)
-    //    tmp_size = 16U*_1K;
     if (tmp_size > 128U*_1K)
         tmp_size = 128U*_1K;
-
     tmp = kmalloc(tmp_size, GFP_KERNEL);
     if (!tmp)
     {
@@ -142,13 +139,6 @@ sf_file_write(struct kiocb *iocb, struct iov_iter *iov)
       }
    }
    return result;
-}
-static int
-sf_file_flush(struct file *file, fl_owner_t id)
-{
-    if ((file->f_mode & FMODE_WRITE) == 0)
-        return 0;    
-    return vfs_fsync(file, 0);
 }
 
 #else /* KERNEL_VERSION >= 3.16.0 */
@@ -356,16 +346,6 @@ sf_file_splice_read(struct file *file, loff_t *offset, struct pipe_inode_info *p
 }
 # endif
 
-# if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 23)
-static int 
-sf_file_fsync(struct file *file, loff_t start, loff_t end,  int datasync)
-{
-    struct inode *inode = file->f_dentry->d_inode; 
-    return filemap_write_and_wait(inode->i_mapping);
-}
-
-
-# endif
 /**
  * Open a regular file.
  *
@@ -410,11 +390,7 @@ static int sf_reg_open(struct inode *inode, struct file *file)
                            | SHFL_CF_ACT_FAIL_IF_EXISTS
                            | SHFL_CF_ACCESS_READWRITE
                            ;
-
-        //
-        //sf_i->file = file;
         list_add_tail(&sf_r->head, &sf_i->regs);
-
         file->private_data = sf_r;
         return 0;
     }
@@ -511,11 +487,8 @@ static int sf_reg_open(struct inode *inode, struct file *file)
 
     sf_i->force_restat = 1;
     sf_r->handle = params.Handle;
-    //
-    //sf_i->file = file;
     sf_r->CreateFlags = params.CreateFlags;
     list_add_tail(&sf_r->head, &sf_i->regs);
-
     file->private_data = sf_r;
     return rc_linux;
 }
@@ -547,22 +520,16 @@ static int sf_reg_release(struct inode *inode, struct file *file)
      * copy and paste the body of filemap_write_and_wait() here as it was not
      * defined before 2.6.6 and not exported until quite a bit later. */
     /* filemap_write_and_wait(inode->i_mapping); */
-
     if (   inode->i_mapping->nrpages
         && filemap_fdatawrite(inode->i_mapping) != -EIO)
         filemap_fdatawait(inode->i_mapping);
-    //if ( inode->i_mapping->nrpages )
-    //    filemap_fdatawrite(inode->i_mapping);
 #endif
     rc = vboxCallClose(&client_handle, &sf_g->map, sf_r->handle);
     if (RT_FAILURE(rc))
         LogFunc(("vboxCallClose failed rc=%Rrc\n", rc));
 
     kfree(sf_r);
-
-    //sf_i->file = NULL;
     list_del_init(&sf_r->head);
-
     sf_i->handle = SHFL_HANDLE_NIL;
     file->private_data = NULL;
     return 0;
@@ -687,9 +654,6 @@ static int sf_reg_mmap(struct file *file, struct vm_area_struct *vma)
     return  generic_file_mmap(file, vma);
 }
 
-    //.fsync       = noop_fsync,
-    //.flush       = sf_file_flush,
-    //.fsync       = sf_file_fsync,
 struct file_operations sf_reg_fops =
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 16, 0)
@@ -850,45 +814,21 @@ sf_gethandle(struct sf_inode_info *sf_i)
     return NULL;
 }
 
-
 static int
 sf_writepage(struct page *page, struct writeback_control *wbc)
 {
     struct address_space *mapping = page->mapping;
     struct inode *inode = mapping->host;
-
     struct sf_glob_info *sf_g = GET_GLOB_INFO(inode->i_sb);
     struct sf_inode_info *sf_i = GET_INODE_INFO(inode);
-
-    //
-    /* struct file *file = sf_i->file; */
-    /* struct sf_reg_info *sf_r = file->private_data; */
-
     int err;
     struct sf_reg_info *sf_r = sf_gethandle(sf_i);
     if (!sf_r)
         return -ENOMEM;
-    //struct sf_reg_info *sf_r;
-    //err = sf_gethandle(sf_i, sf_r);
-    //if (err < 0)
-    //    return -ENOMEM;
-
-    //struct list_head *cur;
-    //list_for_each(cur, &sf_i->regs) {
-    //    struct sf_reg_info *sf_r_tmp = list_entry(cur, struct sf_reg_info, head);
-
-    //    // write可能なやつは一つだけという前提
-    //    if (sf_r_tmp->CreateFlags & SHFL_CF_ACCESS_WRITE) {
-    //        sf_r = sf_r_tmp;
-    //        break;
-    //    }
-    //}
-
     char *buf;
     uint32_t nwritten = PAGE_SIZE;
     int end_index = inode->i_size >> PAGE_SHIFT;
     loff_t off = ((loff_t) page->index) << PAGE_SHIFT;
-
 
     TRACE();
 
@@ -904,14 +844,12 @@ sf_writepage(struct page *page, struct writeback_control *wbc)
         goto out;
     }
 
-
     if (off > inode->i_size)
         inode->i_size = off;
 
     if (PageError(page))
         ClearPageError(page);
     err = 0;
-
 
 out:
     kunmap(page);
@@ -921,325 +859,41 @@ out:
 }
 
 #include <linux/pagevec.h>
-//static int 
-//bulk_write(struct page *page, int *start_index, int *to_write)
-//{
-//    if (&to_write != 0){
-//        // pageが連続していない or tmpサイズを超えてしまう.
-//        if ( &buf_startindex + 1 != page->index || &to_write + PAGE_SIZE > tmp_size){
-//           // tmpに溜め込んだ分をwrite
-//            off = (loff_t) &buf_startindex << PAGE_SHIFT;
-//            err = sf_reg_write_aux(__func__, sf_g, sf_r, physbuf, to_write, off);
-//            if (err < 0)
-//            {
-//                ret = err;
-//                break;
-//            }
-//            if (off > inode->i_size)
-//               inode->i_size = off;
-//    
-//            // stratを今のindexに.
-//            &buf_startindex = page->index;
-//            &to_write = 0;
-//        }
-//    }
-//    copy_page(physbuf + ((page->index - buf_startindex) << PAGE_SHIFT),
-//           page_address(page));
-//    if (page->index >= end_index)
-//        to_write += inode->i_size & (PAGE_SIZE-1);
-//    else
-//        to_write += PAGE_SIZE;
-//}
 static int
 sf_writepages(struct address_space *mapping, struct writeback_control *wbc)
-{
-    struct inode *inode = mapping->host;
-        struct sf_glob_info *sf_g = GET_GLOB_INFO(inode->i_sb);
-        struct sf_inode_info *sf_i = GET_INODE_INFO(inode);
-
-	int ret = 0;
-	int done = 0;
-	struct pagevec pvec;
-	int nr_pages;
-	pgoff_t uninitialized_var(writeback_index);
-	pgoff_t index;
-	pgoff_t end;		/* Inclusive */
-	pgoff_t done_index;
-        pgoff_t buf_startindex = 0;
-        pgoff_t buf_previndex = 0;
-	int cycled;
-	int range_whole = 0;
-	int tag;
-
-        void *physbuf;
-        RTCCPHYS tmp_phys;
-        size_t tmp_size;
-        loff_t off;
-        int end_index = inode->i_size >> PAGE_SHIFT;
-        int err;
-
-        //--------------------------------------
-        // 書き込み可能なhandlを取得
-        struct sf_reg_info *sf_r = sf_gethandle(sf_i);
-        if (!sf_r)
-            return -ENOMEM;
-
-        // TODO: tmp領域を確保する.
-        int bufsize = PAGE_SIZE *  wbc->nr_to_write;
-        if (bufsize > 32 * PAGE_SIZE)
-            bufsize = 32 * PAGE_SIZE;
-
-
-        if (!bufsize)
-            return 0;
-
-        // tmp_phys: virt_to_phys
-        physbuf = alloc_bounce_buffer(&tmp_size, &tmp_phys, bufsize, __PRETTY_FUNCTION__);
-
-        if (!physbuf)
-            return -ENOMEM;
-        //--------------------------------------
-
-
-	pagevec_init(&pvec, 0);
-	//if (wbc->range_cyclic) {
-	//	writeback_index = mapping->writeback_index; /* prev offset */
-	//	index = writeback_index;
-	//	if (index == 0)
-	//		cycled = 1;
-	//	else
-	//		cycled = 0;
-	//	end = -1;
-	//} else {
-		index = wbc->range_start >> PAGE_CACHE_SHIFT;
-		end = wbc->range_end >> PAGE_CACHE_SHIFT;
-		if (wbc->range_start == 0 && wbc->range_end == LLONG_MAX)
-			range_whole = 1;
-		cycled = 1; /* ignore range_cyclic tests */
-	//}
-	if (wbc->sync_mode == WB_SYNC_ALL || wbc->tagged_writepages){
-		tag = PAGECACHE_TAG_TOWRITE;
-	}else{
-		tag = PAGECACHE_TAG_DIRTY;
-        }
-retry:
-	if (wbc->sync_mode == WB_SYNC_ALL || wbc->tagged_writepages)
-		tag_pages_for_writeback(mapping, index, end);
-	done_index = index;
-	while (!done && (index <= end)) {
-		int i;
-                int to_write = 0;
-
-		nr_pages = pagevec_lookup_tag(&pvec, mapping, &index, tag,
-			      min(end - index, (pgoff_t)PAGEVEC_SIZE-1) + 1);
-
-		if (nr_pages == 0)
-			break;
-
-		for (i = 0; i < nr_pages; i++) {
-			struct page *page = pvec.pages[i];
-
-
-			/*
-			 * At this point, the page may be truncated or
-			 * invalidated (changing page->mapping to NULL), or
-			 * even swizzled back from swapper_space to tmpfs file
-			 * mapping. However, page->index will not change
-			 * because we have a reference on the page.
-			 */
-			if (page->index > end) {
-				/*
-				 * can't be range_cyclic (1st pass) because
-				 * end == -1 in that case.
-				 */
-				done = 1;
-				break;
-			}
-
-			done_index = page->index;
-
-			lock_page(page);
-
-			/*
-			 * Page truncated or invalidated. We can freely skip it
-			 * then, even for data integrity operations: the page
-			 * has disappeared concurrently, so there could be no
-			 * real expectation of this data interity operation
-			 * even if there is now a new, dirty page at the same
-			 * pagecache address.
-			 */
-			if (unlikely(page->mapping != mapping)) {
-continue_unlock:
-				unlock_page(page);
-				continue;
-			}
-
-			if (!PageDirty(page)) {
-				/* someone wrote it for us */
-				goto continue_unlock;
-			}
-
-			if (PageWriteback(page)) {
-				if (wbc->sync_mode != WB_SYNC_NONE)
-					wait_on_page_writeback(page);
-				else
-					goto continue_unlock;
-			}
-
-			BUG_ON(PageWriteback(page));
-			if (!clear_page_dirty_for_io(page))
-				goto continue_unlock;
-
-
-			//trace_wbc_writepage(wbc, mapping->backing_dev_info);
-			//ret = (*writepage)(page, wbc, data);
-
-			//ret = sf_writepage(page, wbc);
-
-                        //--------------------------------------
-            		if (to_write != 0){
-            		    // pageが連続していない or tmpサイズを超えてしまう.
-            		    if ( buf_previndex + 1 != page->index || to_write + PAGE_SIZE > tmp_size){
-            		       // tmpに溜め込んだ分をwrite
-            		        off = (loff_t) buf_startindex << PAGE_SHIFT;
-            		        err = sf_reg_write_aux(__func__, sf_g, sf_r, physbuf, &to_write, off);
-            		        if (err < 0)
-            		        {
-            		            ret = err;
-                                    break;
-            		        }
-
-            		        // stratを今のindexに.
-            		        buf_startindex = page->index;
-            		        to_write = 0;
-            		    }
-            		}else{
-            		    buf_startindex = page->index;
-            		}
-
-			// コピーする.
-			copy_page(physbuf + ((page->index - buf_startindex) << PAGE_SHIFT),
-	    		       page_address(page));
-		        if (page->index >= end_index)
-		    	    to_write += inode->i_size & (PAGE_SIZE-1);
-		        else
-		    	    to_write += PAGE_SIZE;
-
-			buf_previndex = page->index;
-
-                        loff_t tmp_off = ((loff_t) page->index) << PAGE_SHIFT;
-			if (tmp_off > inode->i_size)
-			    inode->i_size = tmp_off;
-                        unlock_page(page);
-                        //--------------------------------------
-
-
-			if (unlikely(ret)) {
-				if (ret == AOP_WRITEPAGE_ACTIVATE) {
-					unlock_page(page);
-					ret = 0;
-				} else {
-					/*
-					 * done_index is set past this page,
-					 * so media errors will not choke
-					 * background writeout for the entire
-					 * file. This has consequences for
-					 * range_cyclic semantics (ie. it may
-					 * not be suitable for data integrity
-					 * writeout).
-					 */
-					done_index = page->index + 1;
-					done = 1;
-					break;
-				}
-			}
-
-			/*
-			 * We stop writing back only if we are not doing
-			 * integrity sync. In case of integrity sync we have to
-			 * keep going until we have written all the pages
-			 * we tagged for writeback prior to entering this loop.
-			 */
-			if (--wbc->nr_to_write <= 0 &&
-			    wbc->sync_mode == WB_SYNC_NONE) {
-				done = 1;
-				break;
-			}
-		}
-
-		//--------------------------------------
-		// 最後のtmpを書き込む.
-		if (to_write != 0){
-		    off = ((loff_t) buf_startindex) << PAGE_SHIFT;
-		    err = sf_reg_write_aux(__func__, sf_g, sf_r, physbuf, &to_write, off);
-		    if (err < 0)
-		        ret = err;
-		}
-		//--------------------------------------
-
-
-		pagevec_release(&pvec);
-		cond_resched();
-	}
-	//if (!cycled && !done) {
-	//	/*
-	//	 * range_cyclic:
-	//	 * We hit the last page and there is more work to be done: wrap
-	//	 * back to the start of the file
-	//	 */
-	//	cycled = 1;
-	//	index = 0;
-	//	end = writeback_index - 1;
-	//	goto retry;
-	//}
-	//if (wbc->range_cyclic || (range_whole && wbc->nr_to_write > 0))
-	//	mapping->writeback_index = done_index;
-
-    free_bounce_buffer(physbuf);
-	return ret;
-}
-
-static int
-sf_writepages2(struct address_space *mapping, struct writeback_control *wbc)
 {
     struct inode *inode = mapping->host;
     struct sf_glob_info *sf_g = GET_GLOB_INFO(inode->i_sb);
     struct sf_inode_info *sf_i = GET_INODE_INFO(inode);
 
+    int ret = 0;
+    int done = 0;
     struct pagevec pvec;
-
-    pgoff_t index, end;
+    int nr_pages;
+    pgoff_t uninitialized_var(writeback_index);
+    pgoff_t index;
+    pgoff_t end;		/* Inclusive */
+    pgoff_t done_index;
     pgoff_t buf_startindex = 0;
-
-
-    int nr_pages, i, ret = 0;
-    int bufsize;
+    pgoff_t buf_previndex = 0;
+    int cycled;
+    int range_whole = 0;
+    int tag;
 
     void *physbuf;
     RTCCPHYS tmp_phys;
     size_t tmp_size;
-    uint32_t to_write = 0;
-
     loff_t off;
     int end_index = inode->i_size >> PAGE_SHIFT;
     int err;
 
-    int tag;
-    int done = 0;
-
-
-
-    // 書き込み可能なhandlを取得
     struct sf_reg_info *sf_r = sf_gethandle(sf_i);
     if (!sf_r)
         return -ENOMEM;
 
-
-    // TODO: tmp領域を確保する.
-    bufsize = PAGE_SIZE *  wbc->nr_to_write;
+    int bufsize = PAGE_SIZE *  wbc->nr_to_write;
     if (bufsize > 32 * PAGE_SIZE)
         bufsize = 32 * PAGE_SIZE;
-
     if (!bufsize)
         return 0;
 
@@ -1248,60 +902,102 @@ sf_writepages2(struct address_space *mapping, struct writeback_control *wbc)
     if (!physbuf)
         return -ENOMEM;
 
-    // dirty pageを取得する
-    index = wbc->range_start >> PAGE_CACHE_SHIFT;
-    end = wbc->range_end >> PAGE_CACHE_SHIFT;
-
-
-    if (wbc->sync_mode == WB_SYNC_ALL || wbc->tagged_writepages)
-        tag = PAGECACHE_TAG_TOWRITE;
-    else
-	tag = PAGECACHE_TAG_DIRTY;
-
-    if (wbc->sync_mode == WB_SYNC_ALL || wbc->tagged_writepages)
-        tag_pages_for_writeback(mapping, index, end);
 
     pagevec_init(&pvec, 0);
-
-
+    //if (wbc->range_cyclic) {
+    //    writeback_index = mapping->writeback_index; /* prev offset */
+    //    index = writeback_index;
+    //    if (index == 0)
+    //        cycled = 1;
+    //    else
+    //        cycled = 0;
+    //    end = -1;
+    //} else {
+        index = wbc->range_start >> PAGE_CACHE_SHIFT;
+        end = wbc->range_end >> PAGE_CACHE_SHIFT;
+        if (wbc->range_start == 0 && wbc->range_end == LLONG_MAX)
+            range_whole = 1;
+        cycled = 1; /* ignore range_cyclic tests */
+    //}
+    if (wbc->sync_mode == WB_SYNC_ALL || wbc->tagged_writepages){
+        tag = PAGECACHE_TAG_TOWRITE;
+    }else{
+        tag = PAGECACHE_TAG_DIRTY;
+    }
+retry:
+    if (wbc->sync_mode == WB_SYNC_ALL || wbc->tagged_writepages)
+        tag_pages_for_writeback(mapping, index, end);
+    done_index = index;
     while (!done && (index <= end)) {
-
-        to_write = 0;
+        int i;
+        int to_write = 0;
 
         nr_pages = pagevec_lookup_tag(&pvec, mapping, &index, tag,
                   min(end - index, (pgoff_t)PAGEVEC_SIZE-1) + 1);
 
-        int cnt = 0;
-
-        if (nr_pages == 0){
-            ret = -ENOMEM;
-            goto out;
-        }
-
-        // writeする.
+        if (nr_pages == 0)
+            break;
         for (i = 0; i < nr_pages; i++) {
             struct page *page = pvec.pages[i];
 
+            /*
+             * At this point, the page may be truncated or
+             * invalidated (changing page->mapping to NULL), or
+             * even swizzled back from swapper_space to tmpfs file
+             * mapping. However, page->index will not change
+             * because we have a reference on the page.
+             */
             if (page->index > end) {
+                /*
+                 * can't be range_cyclic (1st pass) because
+                 * end == -1 in that case.
+                 */
                 done = 1;
                 break;
             }
+            done_index = page->index;
+            lock_page(page);
+
+            /*
+             * Page truncated or invalidated. We can freely skip it
+             * then, even for data integrity operations: the page
+             * has disappeared concurrently, so there could be no
+             * real expectation of this data interity operation
+             * even if there is now a new, dirty page at the same
+             * pagecache address.
+             */
+            if (unlikely(page->mapping != mapping)) {
+continue_unlock:
+                unlock_page(page);
+                continue;
+            }
+
+            if (!PageDirty(page)) {
+                /* someone wrote it for us */
+                goto continue_unlock;
+            }
+
+            if (PageWriteback(page)) {
+                if (wbc->sync_mode != WB_SYNC_NONE)
+                    wait_on_page_writeback(page);
+                else
+                    goto continue_unlock;
+            }
+
+            BUG_ON(PageWriteback(page));
+            if (!clear_page_dirty_for_io(page))
+                goto continue_unlock;
 
             if (to_write != 0){
-                // pageが連続していない or tmpサイズを超えてしまう.
-                if ( buf_startindex + 1 != page->index || to_write + PAGE_SIZE > tmp_size){
-                   // tmpに溜め込んだ分をwrite
+                if ( buf_previndex + 1 != page->index || to_write + PAGE_SIZE > tmp_size){
+                   // try to write
                     off = (loff_t) buf_startindex << PAGE_SHIFT;
                     err = sf_reg_write_aux(__func__, sf_g, sf_r, physbuf, &to_write, off);
                     if (err < 0)
                     {
                         ret = err;
-                        goto out;
+                        break;
                     }
-                    if (off > inode->i_size)
-                       inode->i_size = off;
-
-                    // stratを今のindexに.
                     buf_startindex = page->index;
                     to_write = 0;
                 }
@@ -1309,102 +1005,81 @@ sf_writepages2(struct address_space *mapping, struct writeback_control *wbc)
                 buf_startindex = page->index;
             }
 
-            lock_page(page);
-
-            if (unlikely(page->mapping != mapping)) { 
-                unlock_page(page);
-                continue;
-            }
-
-            if (!PageDirty(page)) {
-                /* someone wrote it for us */
-                unlock_page(page);
-                continue;
-            }
-
-            if (PageWriteback(page)) {
-                if (wbc->sync_mode != WB_SYNC_NONE){
-                    wait_on_page_writeback(page);
-                }else{
-                    unlock_page(page);
-                    continue;
-                }
-            }
-
-            if (!clear_page_dirty_for_io(page)){
-                unlock_page(page);
-                continue;
-            }else{
-		++cnt;
-            }  
-
-            // コピーする.
+            // copy to buffer
             copy_page(physbuf + ((page->index - buf_startindex) << PAGE_SHIFT),
-                       page_address(page));
-            //buf = kmap(page);  
-            //copy_page(physbuf + ((page->index - buf_startindex) << PAGE_SHIFT), buf);
-            //kunmap(page);
-
+                        page_address(page));
             if (page->index >= end_index)
                 to_write += inode->i_size & (PAGE_SIZE-1);
             else
                 to_write += PAGE_SIZE;
 
+            buf_previndex = page->index;
+            loff_t tmp_off = ((loff_t) page->index) << PAGE_SHIFT;
+            if (tmp_off > inode->i_size)
+                inode->i_size = tmp_off;
             unlock_page(page);
 
+            if (unlikely(ret)) {
+                if (ret == AOP_WRITEPAGE_ACTIVATE) {
+                    unlock_page(page);
+                    ret = 0;
+                } else {
+                    /*
+                     * done_index is set past this page,
+                     * so media errors will not choke
+                     * background writeout for the entire
+                     * file. This has consequences for
+                     * range_cyclic semantics (ie. it may
+                     * not be suitable for data integrity
+                     * writeout).
+                     */
+                    done_index = page->index + 1;
+                    done = 1;
+                    break;
+                }
+            }
+
+            /*
+             * We stop writing back only if we are not doing
+             * integrity sync. In case of integrity sync we have to
+             * keep going until we have written all the pages
+             * we tagged for writeback prior to entering this loop.
+             */
             if (--wbc->nr_to_write <= 0 &&
                 wbc->sync_mode == WB_SYNC_NONE) {
-                done = 1; 
-            	break;
+                done = 1;
+                break;
             }
         }
 
-        // 最後のtmpを書き込む.
-        off = ((loff_t) buf_startindex) << PAGE_SHIFT;
-        err = sf_reg_write_aux(__func__, sf_g, sf_r, physbuf, &to_write, off);
-        if (err < 0)
-        {
-            ret = err;
-            goto out;
+        // try to write last data
+        if (to_write != 0){
+            off = ((loff_t) buf_startindex) << PAGE_SHIFT;
+            err = sf_reg_write_aux(__func__, sf_g, sf_r, physbuf, &to_write, off);
+            if (err < 0)
+                ret = err;
         }
-        if (off > inode->i_size)
-            inode->i_size = off;
+
+        pagevec_release(&pvec);
+        cond_resched();
     }
+    //if (!cycled && !done) {
+    //    /*
+    //     * range_cyclic:
+    //     * We hit the last page and there is more work to be done: wrap
+    //     * back to the start of the file
+    //     */
+    //    cycled = 1;
+    //    index = 0;
+    //    end = writeback_index - 1;
+    //    goto retry;
+    //}
+    //if (wbc->range_cyclic || (range_whole && wbc->nr_to_write > 0))
+    //    mapping->writeback_index = done_index;
 
-out:
-    pagevec_release(&pvec);
-    cond_resched();
-
-    free_bounce_buffer(physbuf); 
-    //mapping_set_error(mapping, ret);
+    free_bounce_buffer(physbuf);
     return ret;
-
-    //// サイズ更新は、write_endの段階で終了しているはず.
-    //if (off > inode->i_size)
-    //    inode->i_size = off;
-
-    // http://wiki.bit-hive.com/linuxkernelmemo/pg/mpage_writepages()
-    // write_cache_pages @ linux-source-3.16/mm/page-writeback.c
-    // pagevec_lookup_tagでdirty page listを取得
-
-    // ループ内で何をするか?
-    //  1. 連続していない & tmpがまだ余っていないなら、tmpを書き込み.
-    //  2. pageの内容をコピー     <- コピーいらない. アドレスの計算だけだ.
-    //  3. 次へ.
-
-    // 書き込みが終わったら,
-    //     pagevec_release(&pvec);
-    //     dirty flagは自分で下ろす必要あるか？
-    //
-    // filemap_fdatawait_range @ linux-source-3.16/mm/filemap.c 
-
-    // TODO:
-    //      dirtyなpageが連続していた場合、page lockはどうする？ 
-    //      --wbc->nr_to_writeは実行したほうが良い?
-    //      どうやって、連続しているか否かを判断するか？
-    //
 }
-
 # if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 24)
 
 /*
@@ -1436,7 +1111,6 @@ static int sf_want_read_modify_write(struct file *file, struct page *page,
 
     if ((file->f_mode & FMODE_READ) &&  /* open for read? */
         !PageUptodate(page) &&          /* Uptodate? */
-        //!PagePrivate(page) &&           /* i/o request already? */
         !PageDirty(page) &&             /* page dirty */
         pglen &&                        /* valid bytes of file? */
         (end < pglen || offset))        /* replace all valid bytes? */
@@ -1499,7 +1173,6 @@ int sf_write_end(struct file *file, struct address_space *mapping, loff_t pos,
     struct timespec ct = CURRENT_TIME;
     int err = 0;
 
-
     TRACE();
 
     /* buf = kmap(page); */
@@ -1521,7 +1194,6 @@ int sf_write_end(struct file *file, struct address_space *mapping, loff_t pos,
             zero_user_segment(page, pglen, PAGE_CACHE_SIZE);
     }
 
-    // set dirty
     if (!PageUptodate(page)){
         buf = kmap(page);
         err = sf_reg_write_aux(__func__, sf_g, sf_r, buf+from, &nwritten, pos);
@@ -1529,23 +1201,9 @@ int sf_write_end(struct file *file, struct address_space *mapping, loff_t pos,
     }else{
         __set_page_dirty_nobuffers(page);
     }
-    /* if (!PageUptodate(page) && err == PAGE_SIZE) */
-    /*     SetPageUptodate(page); */
-
-    //if (err >= 0) {
-    //    spin_lock(&inode->i_lock);  
-    //    pos += copied;
-    //    if (pos > inode->i_size)
-    //        inode->i_size = pos;
-    //    spin_unlock(&inode->i_lock);  
-    //}
-
     if (err >= 0) {
         update_file_size(page, to);
     }
-
-
-
 
     unlock_page(page);
     page_cache_release(page);

@@ -366,8 +366,6 @@ static struct dentry *sf_lookup(struct inode *parent, struct dentry *dentry
 #endif
                                )
 {
-
-    //printk("sf_lookup\n");
     int err;
     struct sf_inode_info *sf_i, *sf_new_i;
     struct sf_glob_info *sf_g;
@@ -515,9 +513,7 @@ static int sf_instantiate(struct inode *parent, struct dentry *dentry,
 
     /* Store this handle if we leave the handle open. */
     sf_new_i->handle = handle;
-
     INIT_LIST_HEAD(&sf_new_i->regs);
-
     return 0;
 
 fail1:
@@ -772,12 +768,12 @@ static int sf_rename(struct inode *old_parent, struct dentry *old_dentry,
         struct sf_inode_info *sf_old_i = GET_INODE_INFO(old_parent);
         struct sf_inode_info *sf_new_i = GET_INODE_INFO(new_parent);
 
-        //
+        // writeback before rename 
         struct inode *old_inode = old_dentry->d_inode;
-	if (   old_inode->i_mapping->nrpages
-		&& filemap_fdatawrite(old_inode->i_mapping) != -EIO){
-		filemap_fdatawait(old_inode->i_mapping);
-	}
+        if (   old_inode->i_mapping->nrpages
+            && filemap_fdatawrite(old_inode->i_mapping) != -EIO){
+            filemap_fdatawait(old_inode->i_mapping);
+        }
 
         /* As we save the relative path inside the inode structure, we need to change
            this if the rename is successful. */
