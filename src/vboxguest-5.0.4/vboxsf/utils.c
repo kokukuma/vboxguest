@@ -260,12 +260,10 @@ int sf_inode_revalidate(struct dentry *dentry)
 
     // ゲストの方が更新時刻が新しいなら、ゲストの更新はしない.
     // size/更新日時がゲスト・ホストで同じなら、page cacheの開放はしない.
-    if ( guest_time.tv_sec > host_time.tv_sec ){
+    if ( guest_time.tv_sec >= host_time.tv_sec )
         return 0;
-    } else if ( info.cbObject != dentry->d_inode->i_size ||
-                guest_time.tv_sec < host_time.tv_sec){
-        invalidate_inode_pages2(dentry->d_inode->i_mapping);
-    }
+
+    invalidate_inode_pages2(dentry->d_inode->i_mapping);
     sf_init_inode(sf_g, dentry->d_inode, &info);
     sf_i->force_restat = 0;
     return 0;
