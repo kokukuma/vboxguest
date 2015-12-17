@@ -884,7 +884,7 @@ sf_writepages(struct address_space *mapping, struct writeback_control *wbc)
     RTCCPHYS tmp_phys;
     size_t tmp_size;
     loff_t off;
-    int end_index = inode->i_size >> PAGE_SHIFT;
+    int end_index;
     int err;
 
     struct sf_reg_info *sf_r = sf_gethandle(sf_i);
@@ -904,21 +904,21 @@ sf_writepages(struct address_space *mapping, struct writeback_control *wbc)
 
 
     pagevec_init(&pvec, 0);
-    //if (wbc->range_cyclic) {
-    //    writeback_index = mapping->writeback_index; /* prev offset */
-    //    index = writeback_index;
-    //    if (index == 0)
-    //        cycled = 1;
-    //    else
-    //        cycled = 0;
-    //    end = -1;
-    //} else {
+    if (wbc->range_cyclic) {
+        writeback_index = mapping->writeback_index; /* prev offset */
+        index = writeback_index;
+        if (index == 0)
+            cycled = 1;
+        else
+            cycled = 0;
+        end = -1;
+    } else {
         index = wbc->range_start >> PAGE_CACHE_SHIFT;
         end = wbc->range_end >> PAGE_CACHE_SHIFT;
         if (wbc->range_start == 0 && wbc->range_end == LLONG_MAX)
             range_whole = 1;
         cycled = 1; /* ignore range_cyclic tests */
-    //}
+    }
     if (wbc->sync_mode == WB_SYNC_ALL || wbc->tagged_writepages){
         tag = PAGECACHE_TAG_TOWRITE;
     }else{
@@ -1008,6 +1008,7 @@ continue_unlock:
             // copy to buffer
             copy_page(physbuf + ((page->index - buf_startindex) << PAGE_SHIFT),
                         page_address(page));
+            end_index = inode->i_size >> PAGE_SHIFT;
             if (page->index >= end_index)
                 to_write += inode->i_size & (PAGE_SIZE-1);
             else
@@ -1063,19 +1064,19 @@ continue_unlock:
         pagevec_release(&pvec);
         cond_resched();
     }
-    //if (!cycled && !done) {
-    //    /*
-    //     * range_cyclic:
-    //     * We hit the last page and there is more work to be done: wrap
-    //     * back to the start of the file
-    //     */
-    //    cycled = 1;
-    //    index = 0;
-    //    end = writeback_index - 1;
-    //    goto retry;
-    //}
-    //if (wbc->range_cyclic || (range_whole && wbc->nr_to_write > 0))
-    //    mapping->writeback_index = done_index;
+    if (!cycled && !done) {
+        /*
+         * range_cyclic:
+         * We hit the last page and there is more work to be done: wrap
+         * back to the start of the file
+         */
+        cycled = 1;
+        index = 0;
+        end = writeback_index - 1;
+        goto retry;
+    }
+    if (wbc->range_cyclic || (range_whole && wbc->nr_to_write > 0))
+        mapping->writeback_index = done_index;
 
     free_bounce_buffer(physbuf);
     return ret;
@@ -1170,7 +1171,6 @@ int sf_write_end(struct file *file, struct address_space *mapping, loff_t pos,
     unsigned from = pos & (PAGE_SIZE - 1);
     unsigned to = from + len;
     uint32_t nwritten = len;
-    struct timespec ct = CURRENT_TIME;
     int err = 0;
 
     TRACE();
